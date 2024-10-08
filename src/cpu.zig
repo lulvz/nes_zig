@@ -1,22 +1,5 @@
 const std = @import("std");
-
-const ADDRESSING_MODE = enum {
-    ACCUMULATOR,
-    IMMEDIATE,
-    IMPLIED,
-    RELATIVE,
-    ABSOLUTE,
-    ABSOLUTE_X,
-    ABSOLUTE_Y,
-
-    ZEROPAGE,
-    ZEROPAGE_X,
-    ZEROPAGE_Y,
-
-    INDIRECT,
-    INDEXED_INDIRECT,
-    INDIRECT_INDEXED,
-};
+const instructions = @import("instructions.zig");
 
 const CPU6502 = @This();
 
@@ -122,8 +105,82 @@ fn fetchByteAtPC(self: *CPU6502) u8 {
 pub fn step(self: *CPU6502) void {
     const opcode = self.fetchByteAtPC();
     self.pc+=1;
-    switch (opcode) {
 
+    const i: instructions.Instruction = instructions.instruction_set[opcode];
+    var address: u16 = 0;
+    var page_crossed = false;
+
+    // Decode addressing mode TODO CHECK IF THIS IS CORRECT
+    switch (i.addressing_mode) {
+        .ACCUMULATOR => {},
+        .IMMEDIATE => {
+            address = self.pc;
+            self.pc += 1;
+        },
+        .IMPLIED => {},
+        .RELATIVE => {
+            const offset: i8 = @bitCast(self.readByte(self.pc));
+            address = @intCast(@as(i32, self.pc) + @as(i32, offset) + 1);
+            self.pc += 1;
+        },
+        .ABSOLUTE => {
+            address = self.readWordArgument();
+            self.pc += 2;
+        },
+        .ABSOLUTE_X => {
+            const base = self.readWordArgument();
+            address = base +% self.iX;
+            page_crossed = (address & 0xFF00) != (base & 0xFF00);
+            self.pc += 2;
+        },
+        .ABSOLUTE_Y => {
+            const base = self.readWordArgument();
+            address = base +% self.iY;
+            page_crossed = (address & 0xFF00) != (base & 0xFF00);
+            self.pc += 2;
+        },
+        .ZEROPAGE => {
+            address = self.readByte(self.pc);
+            self.pc += 1;
+        },
+        .ZEROPAGE_X => {
+            address = (self.readByte(self.pc) +% self.iX) & 0xFF;
+            self.pc += 1;
+        },
+        .ZEROPAGE_Y => {
+            address = (self.readByte(self.pc) +% self.iY) & 0xFF;
+            self.pc += 1;
+        },
+        .INDIRECT => {
+            const pointer = self.readWordArgument();
+            address = self.readWord(pointer);
+            self.pc += 2;
+        },
+        .INDEXED_INDIRECT => {
+            const pointer = (self.readByte(self.pc) +% self.iX) & 0xFF;
+            address = self.readWord(pointer);
+            self.pc += 1;
+        },
+        .INDIRECT_INDEXED => {
+            const pointer = self.readByte(self.pc);
+            const base = self.readWord(pointer);
+            address = base +% self.iY;
+            page_crossed = (address & 0xFF00) != (base & 0xFF00);
+            self.pc += 1;
+        },
+    }
+
+    switch (i.opcode) {
+        .LDA => {
+            self.acc = self.readByte(address);
+            self.updateFlags(self.acc);
+        },
+        .STA => {
+            self.writeByte(address, self.acc);
+        },
+        else => {
+            std.debug.print("Unimplemented opcode: {}\n", .{i.opcode});
+        },
     }
 }
 

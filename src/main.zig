@@ -1,6 +1,14 @@
+const std = @import("std");
 const rl = @import("raylib");
 
+const instructions = @import("instructions.zig");
+
 pub fn main() anyerror!void {
+    std.debug.print("{d}\n", .{instructions.instruction_set.len});
+    // try runWindow();
+}
+
+pub fn runWindow() anyerror!void {
     // Initialization
     //--------------------------------------------------------------------------------------
     const screenWidth = 800;
