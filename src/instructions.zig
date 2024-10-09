@@ -35,7 +35,7 @@ pub const Instruction = struct {
 };
 
 pub const instruction_set = [_]Instruction{
-    Instruction{ .opcode = .BRK, .addressing_mode = .IMMEDIATE, .cycles = 7 },
+    Instruction{ .opcode = .BRK, .addressing_mode = .IMPLIED, .cycles = 7 },
     Instruction{ .opcode = .ORA, .addressing_mode = .INDEXED_INDIRECT, .cycles = 6 },
     Instruction{ .opcode = .KIL, .addressing_mode = .IMPLIED, .cycles = 0 },
     Instruction{ .opcode = .SLO, .addressing_mode = .INDEXED_INDIRECT, .cycles = 8 },
