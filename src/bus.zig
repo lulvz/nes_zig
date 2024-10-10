@@ -6,7 +6,7 @@ const Cartridge = @import("cartridge.zig");
 
 const Bus = @This();
 
-// ram Memory is 2KB for the NES ($0000–$07FF)
+// ram Memory is 2KB for the NES ($0000–$07FF) Stack is at ($0100-$01FF)
 ram: [1024*2]u8,
 PPU: *PPU,
 APU: *APU,

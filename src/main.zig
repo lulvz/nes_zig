@@ -4,6 +4,8 @@ const rl = @import("raylib");
 const Bus = @import("bus.zig");
 const CPU6502 = @import("cpu6502.zig");
 
+const Stack = @import("stack.zig").Stack;
+
 pub fn main() anyerror!void {
     var bus = Bus.init();
     var cpu = CPU6502.init(&bus);
@@ -13,12 +15,18 @@ pub fn main() anyerror!void {
     // Write the instruction and operand to memory
     bus.writeByte(0x0000, 0x69); // ADC Immediate opcode
     bus.writeByte(0x0001, 0x10); // Operand
+
+    bus.writeByte(0x0002, 0x0A);
     
     // Execute one instruction
     cpu.pc = 0x0000;
 
     cpu.step();
-    std.debug.print("{x}\n", .{cpu.acc});
+    std.debug.print("Value was: {x}\nValue should be: {x}\n", .{cpu.acc, 0x50 + 0x10});
+    std.debug.print("{b}\n", .{cpu.P.c_carry});
+    cpu.step();
+    std.debug.print("Value was: {x}\nValue should be: {x}\n", .{cpu.acc, (0x50+0x10)<<1});
+    std.debug.print("{b}\n", .{cpu.P.c_carry});
 
     // try runWindow();
 }

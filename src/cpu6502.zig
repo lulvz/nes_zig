@@ -48,6 +48,7 @@ pub fn init(bus: *Bus) CPU6502 {
     return cpu6592;
 }
 
+// TODO NUMBER OF CYCLES, BASED ON P AND T (https://www.pagetable.com/c64ref/6502/?tab=2#)
 pub fn step(self: *CPU6502) void {
     const opcode = self.bus.readByte(self.pc);
     self.pc+=1;
@@ -55,11 +56,14 @@ pub fn step(self: *CPU6502) void {
     const i: instructions.Instruction = instructions.instruction_set[opcode];
     var address: u16 = 0;
     var page_crossed = false;
+    var accumulator_mode = false;
 
     // Decode addressing mode TODO CHECK IF THIS IS CORRECT
     switch (i.addressing_mode) {
         // Non-Indexed, Non-Memory
-        .ACCUMULATOR => {},
+        .ACCUMULATOR => {
+            accumulator_mode = true;
+        },
         .IMMEDIATE => {
             address = self.pc;
             self.pc += 1;
@@ -135,12 +139,57 @@ pub fn step(self: *CPU6502) void {
             self.acc = @as(u8, @truncate(result));
 
             // Update status flags
-            self.updateFlags(self.acc);
+            self.updateNZFlags(self.acc);
 
             // Update carry flag
             self.P.c_carry = if (result > 0xFF) 1 else 0; // Set carry flag if overflow occurs 
             // Update overflow flag (when result sign is different but addends have same sign)
             self.P.v_overflow = @as(u1, @truncate(((self.acc ^ old_acc) & (self.acc ^ operand)) >> 7));
+        },
+        .AND => { // Operation: A ∧ M → A
+            const operand: u8 = self.bus.readByte(address);
+            self.acc = self.acc & operand;
+            self.updateNZFlags(self.acc);
+        },
+        .ASL => { // Operation: C ← /M7...M0/ ← 0
+            if(accumulator_mode) { // accumulator addressing mode
+                self.P.c_carry = @as(u1, @truncate((self.acc & 0x80) >> 7));
+                self.acc <<= 1;
+                self.updateNZFlags(self.acc);
+            } else {
+                const operand = self.bus.readByte(address);
+                self.P.c_carry = @as(u1, @truncate((operand & 0x80) >> 7));
+                const shifted_value = operand << 1;
+                self.bus.writeByte(address, operand << 1);
+                self.updateNZFlags(shifted_value);
+            }
+        },
+        .BCC => {
+            if(self.P.c_carry == 0) {
+                self.pc = address;
+            }
+        },
+        .BCS => {
+            if(self.P.c_carry == 1) {
+                self.pc = address;
+            }
+        },
+        .BEQ => {
+            if(self.P.z_zero == 1) {
+                self.pc = address;
+            }
+        },
+        .BIT => { // Operation: A ∧ M, M7 → N, M6 → V
+            const operand: u8 = self.bus.readByte(address);
+            const result: u8 = self.acc & operand;
+            // N and V flags are set based on the memory
+            self.P.n_negative = @as(u1, @truncate((operand & 0x80) >> 7));
+            self.P.v_overflow = @as(u1, @truncate((operand & 0x40) >> 6));
+            // Z flag is set based on the result
+            self.P.z_zero = if(result == 0) 1 else 0;
+        },
+        .BMI => {
+
         },
         else => {
             std.debug.print("Unimplemented opcode: {}\n", .{i.opcode});
@@ -148,7 +197,7 @@ pub fn step(self: *CPU6502) void {
     }
 }
 
-fn updateFlags(self: *CPU6502, value: u8) void {
+fn updateNZFlags(self: *CPU6502, value: u8) void {
     if (value == 0) {
         self.P.z_zero = 1; // Set zero flag
     } else {
