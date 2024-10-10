@@ -4,8 +4,6 @@ const rl = @import("raylib");
 const Bus = @import("bus.zig");
 const CPU6502 = @import("cpu6502.zig");
 
-const Stack = @import("stack.zig").Stack;
-
 pub fn main() anyerror!void {
     var bus = Bus.init();
     var cpu = CPU6502.init(&bus);
@@ -29,6 +27,11 @@ pub fn main() anyerror!void {
     std.debug.print("{b}\n", .{cpu.P.c_carry});
 
     // try runWindow();
+
+    const number: u8 = 255;
+    std.debug.print("Number before: {d}\n", .{number});
+    const number_m: i8 = @bitCast(number); 
+    std.debug.print("Number after: {d}\n", .{number_m});
 }
 
 pub fn runWindow() anyerror!void {

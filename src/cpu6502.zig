@@ -26,7 +26,7 @@ bus: *Bus,
 pub fn init(bus: *Bus) CPU6502 {
     var cpu6592 = CPU6502{
         .pc = 0xfffc,
-        .sp = 0x0,
+        .sp = 0xFF,
         .acc = 0x0,
         .X = 0x0,
         .Y = 0x0,
@@ -56,13 +56,11 @@ pub fn step(self: *CPU6502) void {
     const i: instructions.Instruction = instructions.instruction_set[opcode];
     var address: u16 = 0;
     var page_crossed = false;
-    var accumulator_mode = false;
 
     // Decode addressing mode TODO CHECK IF THIS IS CORRECT
     switch (i.addressing_mode) {
         // Non-Indexed, Non-Memory
         .ACCUMULATOR => {
-            accumulator_mode = true;
         },
         .IMMEDIATE => {
             address = self.pc;
@@ -73,8 +71,8 @@ pub fn step(self: *CPU6502) void {
         // Non-Indexed Memory Ops
         .RELATIVE => {
             const offset: i8 = @bitCast(self.bus.readByte(self.pc));
+            address = @bitCast(@as(i16, @bitCast(self.pc)) +% @as(i16, offset) +% 1); // todo check if this is correct
             self.pc += 1;
-            address = @intCast(@as(i32, self.pc) + @as(i32, offset) + 1);
         },
         .ABSOLUTE => {
             address = self.bus.readWord(self.pc);
@@ -152,17 +150,16 @@ pub fn step(self: *CPU6502) void {
             self.updateNZFlags(self.acc);
         },
         .ASL => { // Operation: C ← /M7...M0/ ← 0
-            if(accumulator_mode) { // accumulator addressing mode
-                self.P.c_carry = @as(u1, @truncate((self.acc & 0x80) >> 7));
-                self.acc <<= 1;
-                self.updateNZFlags(self.acc);
-            } else {
-                const operand = self.bus.readByte(address);
-                self.P.c_carry = @as(u1, @truncate((operand & 0x80) >> 7));
-                const shifted_value = operand << 1;
-                self.bus.writeByte(address, operand << 1);
-                self.updateNZFlags(shifted_value);
-            }
+            const operand = self.bus.readByte(address);
+            self.P.c_carry = @as(u1, @truncate((operand & 0x80) >> 7));
+            const shifted_value = operand << 1;
+            self.bus.writeByte(address, shifted_value);
+            self.updateNZFlags(shifted_value);
+        },
+        .ASLA => {
+            self.P.c_carry = @as(u1, @truncate((self.acc & 0x80) >> 7));
+            self.acc <<= 1;
+            self.updateNZFlags(self.acc);
         },
         .BCC => {
             if(self.P.c_carry == 0) {
@@ -189,7 +186,154 @@ pub fn step(self: *CPU6502) void {
             self.P.z_zero = if(result == 0) 1 else 0;
         },
         .BMI => {
+            if(self.P.n_negative == 1){
+                self.pc = address;
+            }
+        },
+        .BNE => {
+            if(self.P.z_zero == 0) {
+                self.pc = address;
+            }
+        },
+        .BPL => {
+            if(self.P.n_negative == 0) {
+                self.pc = address;
+            }
+        },
+        .BRK => {
+            // Push the high byte of the PC to the stack
+            self.bus.writeByte(0x0100 + self.sp, @truncate(return_address >> 8));
+            self.sp -= 1;
 
+            // Push the low byte of the PC to the stack
+            self.bus.writeByte(0x0100 + self.sp, @truncate(return_address & 0xFF));
+            self.sp -= 1;
+
+            // Set the break flag in the status register
+            self.P.b_break = 1;
+
+            // Push the status register to the stack
+            var status_register: u8 = 0;
+            status_register |= @as(u8, self.P.n_negative) << 7;
+            status_register |= @as(u8, self.P.v_overflow) << 6;
+            status_register |= 1 << 5; // The 5th bit is always set to 1
+            status_register |= @as(u8, self.P.b_break) << 4;
+            status_register |= @as(u8, self.P.d_decimal) << 3;
+            status_register |= @as(u8, self.P.i_interrupt_disable) << 2;
+            status_register |= @as(u8, self.P.z_zero) << 1;
+            status_register |= @as(u8, self.P.c_carry);
+            
+            self.bus.writeByte(0x0100 + self.sp, status_register);
+            self.sp -= 1;
+
+            // Set the interrupt disable flag to prevent further interrupts
+            self.P.i_interrupt_disable = 1;
+
+            // Fetch the new PC from the interrupt vector (0xFFFE and 0xFFFF)
+            const low_byte = self.bus.readByte(0xFFFE);
+            const high_byte = self.bus.readByte(0xFFFF);
+            self.pc = @as(u16, (high_byte << 8) | low_byte);
+            // TODO CHECK IF THIS ISRIGHT
+        },
+        .BVC => {
+            if(self.P.v_overflow == 0) {
+                self.pc = address;
+            }
+        },
+        .BVS => {
+            if(self.P.v_overflow == 1) {
+                self.pc = address;
+            }
+        },
+        .CLC => {
+            self.P.c_carry = 0;
+        },
+        .CLD => {
+            self.P.d_decimal = 0;
+        },
+        .CLI => {
+            self.P.i_interrupt_disable = 0;
+        },
+        .CLV => {
+            self.P.v_overflow = 0;
+        },
+        .CMP => {
+            const operand: u8 = self.bus.readByte(address);
+            self.updateNZFlags(self.acc - operand);
+            if(self.acc >= operand) {
+                self.P.c_carry = 1;
+            } else {
+                self.P.c_carry = 0;
+            }
+        },
+        .CPX => {
+            const operand: u8 = self.bus.readByte(address);
+            self.updateNZFlags(self.X - operand);
+            if(self.X >= operand) {
+                self.P.c_carry = 1;
+            } else {
+                self.P.c_carry = 0;
+            }
+        },
+        .CPY => {
+            const operand: u8 = self.bus.readByte(address);
+            self.updateNZFlags(self.Y - operand);
+            if(self.Y >= operand) {
+                self.P.c_carry = 1;
+            } else {
+                self.P.c_carry = 0;
+            }
+        },
+        .DEC => {
+            const operand: u8 = self.bus.readByte(address);
+            const result: u8 = operand -% 1;
+            self.bus.writeByte(address, result); 
+            self.updateNZFlags(result);
+        },
+        .DEX => {
+            self.X -%= 1;
+            self.updateNZFlags(self.X); 
+        },
+        .DEY => {
+            self.Y -%=1;
+            self.updateNZFlags(self.Y);
+        },
+        .EOR => {
+            const operand = self.bus.readByte(address);   
+            const result = self.acc ^ operand;
+            self.acc = result;
+            self.updateNZFlags(result);
+        },
+        .INC => {
+            const operand: u8 = self.bus.readByte(address);
+            const result: u8 = operand +% 1;
+            self.bus.writeByte(address, result); 
+            self.updateNZFlags(result); 
+        },
+        .INX => {
+            self.X +%= 1;
+            self.updateNZFlags(self.X); 
+        },
+        .INY => {
+            self.Y +%= 1;
+            self.updateNZFlags(self.Y);
+        },
+        .JMP => {
+            self.pc = address;
+        },
+        .JSR => { // this instruction doesn't push the address of the next instruction to the stack, it pushes the address of the last byte of the instruction itself (it's a 3 byte instruction) and expects the RTS instruction to add 1 to that address when popping it's value from the stack to resume execution
+            const return_address = self.pc - 1; // Subtract 1 from PC
+
+            // Push the high byte of the return address to the stack
+            self.bus.writeByte(0x0100 + self.sp, @truncate(return_address >> 8));
+            self.sp -= 1;
+
+            // Push the low byte of the return address to the stack
+            self.bus.writeByte(0x0100 + self.sp, @truncate(return_address & 0xFF));
+            self.sp -= 1;
+
+            // Jump to the subroutine address
+            self.pc = address;
         },
         else => {
             std.debug.print("Unimplemented opcode: {}\n", .{i.opcode});
