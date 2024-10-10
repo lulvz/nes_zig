@@ -1,10 +1,25 @@
 const std = @import("std");
 const rl = @import("raylib");
 
-const instructions = @import("instructions.zig");
+const Bus = @import("bus.zig");
+const CPU6502 = @import("cpu6502.zig");
 
 pub fn main() anyerror!void {
-    std.debug.print("{d}\n", .{instructions.instruction_set.len});
+    var bus = Bus.init();
+    var cpu = CPU6502.init(&bus);
+    cpu.acc = 0x50;
+    cpu.P.c_carry = 0;
+    
+    // Write the instruction and operand to memory
+    bus.writeByte(0x0000, 0x69); // ADC Immediate opcode
+    bus.writeByte(0x0001, 0x10); // Operand
+    
+    // Execute one instruction
+    cpu.pc = 0x0000;
+
+    cpu.step();
+    std.debug.print("{x}\n", .{cpu.acc});
+
     // try runWindow();
 }
 

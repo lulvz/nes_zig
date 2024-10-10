@@ -19,7 +19,7 @@ P: packed struct { // processor status (packed structs are cool)
     c_carry: u1,
 },
 
-screen: u8[256*240], // 56 colors per pixel (could be u6)
+screen: [256*240]u8, // 56 colors per pixel (could be u6)
 
 bus: *Bus,
 
@@ -30,12 +30,19 @@ pub fn init(bus: *Bus) CPU6502 {
         .acc = 0x0,
         .X = 0x0,
         .Y = 0x0,
-        .P = undefined,
+        .P = .{
+            .n_negative = 0x0,
+            .v_overflow = 0x0,
+            .b_break = 0x0,
+            .d_decimal = 0x0, // not supported in the NES (thank god TT)
+            .i_interrupt_disable = 0x0,
+            .z_zero = 0x0,
+            .c_carry = 0x0,
+        },
         .screen = undefined,
         .bus = bus,
     };
 
-    @memset(&cpu6592.P, 0x0);
     @memset(&cpu6592.screen, 0x0);
 
     return cpu6592;

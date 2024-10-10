@@ -21,13 +21,12 @@ cartridge: *Cartridge,
 // CART: [49_120]u8,
 
 pub fn init() Bus {
-    const bus = .Bus {
-        .ram = undefined,
+    const bus: Bus = .{
+        .ram = std.mem.zeroes([1024*2]u8),
         .PPU = undefined,
         .APU = undefined,
-        .CART = undefined,
+        .cartridge = undefined,
     };
-    @memset(&bus.ram, 0x0);
 
     return bus;
 }
@@ -36,8 +35,8 @@ pub fn readByte(self: *Bus, addr: u16) u8 {
     return switch (addr) {
         0x0000...0x1FFF => self.ram[addr & 0x07FF],
         0x2000...0x3FFF => self.PPU.readRegister(addr & 0x0007),
-        0x4000...0x401F => self.APU.readRegister(addr - 0x4000),
-        0x4020...0xFFFF => self.cartridge.read(addr),
+        0x4000...0x401F => self.APU.readRegister(addr - 0x4000),// TODO FIX THESE VALUES
+        0x4020...0xFFFF => self.cartridge.readByte(addr),
     };
 }
 
@@ -45,8 +44,8 @@ pub fn writeByte(self: *Bus, addr: u16, value: u8) void {
     switch (addr) {
         0x0000...0x1FFF => self.ram[addr & 0x07FF] = value,
         0x2000...0x3FFF => self.PPU.writeRegister(addr & 0x0007, value),
-        0x4000...0x401F => self.APU.writeRegister(addr - 0x4000, value),
-        0x4020...0xFFFF => self.cartridge.write(addr, value),
+        0x4000...0x401F => self.APU.writeRegister(addr - 0x4000, value),// TODO FIX THESE VALUES TOO
+        0x4020...0xFFFF => self.cartridge.writeByte(addr, value),
     }
 }
 
