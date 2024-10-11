@@ -13,7 +13,7 @@ pub fn run6502Test() anyerror!void {
     var bus = Bus.initTesting();
     try bus.loadTestROM("test_bin/6502_functional_test.bin");
     var cpu = CPU6502.init(&bus);
-    cpu.pc = 0x0208;
+    cpu.pc = 0xC000;
 
     const screenWidth = 800;
     const screenHeight = 450;

@@ -9,14 +9,16 @@ sp: u8,
 acc: u8,
 X: u8,
 Y: u8,
+// least to most significant bit
 P: packed struct { // processor status (packed structs are cool)
-    n_negative: u1,
-    v_overflow: u1,
-    b_break: u1,
-    d_decimal: u1, // not supported in the NES (thank god TT)
-    i_interrupt_disable: u1,
-    z_zero: u1,
     c_carry: u1,
+    z_zero: u1,
+    i_interrupt_disable: u1,
+    d_decimal: u1, // not supported in the NES (thank god TT)
+    b_break: u1,
+    no_cpu_effect: u1,
+    v_overflow: u1,
+    n_negative: u1,
 },
 
 screen: [256*240]u8, // 56 colors per pixel (could be u6)
@@ -31,13 +33,14 @@ pub fn init(bus: *Bus) CPU6502 {
         .X = 0x0,
         .Y = 0x0,
         .P = .{
-            .n_negative = 0x0,
-            .v_overflow = 0x0,
-            .b_break = 0x0,
-            .d_decimal = 0x0, // not supported in the NES (thank god TT)
-            .i_interrupt_disable = 0x0,
-            .z_zero = 0x0,
             .c_carry = 0x0,
+            .z_zero = 0x0,
+            .i_interrupt_disable = 0x0,
+            .d_decimal = 0x0, // not supported in the NES (thank god TT)
+            .b_break = 0x0,
+            .no_cpu_effect = 0x1,
+            .v_overflow = 0x0,
+            .n_negative = 0x0,
         },
         .screen = undefined,
         .bus = bus,
@@ -229,15 +232,7 @@ pub fn step(self: *CPU6502) void {
             self.P.b_break = 1;
 
             // Push the status register to the stack
-            var status_register: u8 = 0;
-            status_register |= @as(u8, self.P.n_negative) << 7;
-            status_register |= @as(u8, self.P.v_overflow) << 6;
-            status_register |= 1 << 5; // The 5th bit is always set to 1
-            status_register |= @as(u8, self.P.b_break) << 4;
-            status_register |= @as(u8, self.P.d_decimal) << 3;
-            status_register |= @as(u8, self.P.i_interrupt_disable) << 2;
-            status_register |= @as(u8, self.P.z_zero) << 1;
-            status_register |= @as(u8, self.P.c_carry);
+            const status_register: u8 = @bitCast(self.P);
             
             self.pushToStack(status_register);
 
@@ -373,53 +368,117 @@ pub fn step(self: *CPU6502) void {
         },
         .NOP => {},
         .ORA => {
-
+            const operand = self.bus.readByte(address);
+            self.acc = self.acc | operand;
+            self.updateNZFlags(self.acc);
         },
         .PHA => {
+            self.pushToStack(self.acc);
         },
         .PHP => {
+            self.pushToStack(@bitCast(self.P));
         },
         .PLA => { 
+            self.acc = self.popFromStack();
+            self.updateNZFlags(self.acc);
         },
         .PLP => {
+            self.P = self.popFromStack();
         },
         .ROL => {
+            const operand = self.bus.readByte(address);
+            self.P.c_carry = @as(u1, @truncate((operand & 0x80) >> 7));
+            const shifted_value = (operand << 1) | @as(u8, self.P.c_carry);
+            self.bus.writeByte(address, shifted_value);
+            self.updateNZFlags(shifted_value);
         },
-        .ROLA => {                
+        .ROLA => {
+            self.P.c_carry = @as(u1, @truncate((self.acc & 0x80) >> 7));
+            self.acc = (self.acc << 1) | @as(u8, self.P.c_carry);
+            self.updateNZFlags(self.acc);
         },
         .ROR => {
+            const operand = self.bus.readByte(address);
+            self.P.c_carry = @truncate(operand & 0x01);
+            const shifted_value = operand >> 1 | (@as(u8, self.P.c_carry) << 7);
+            self.bus.writeByte(address, shifted_value);
+            self.updateNZFlags(shifted_value); // N is 0, Z is updated based on the result
         },
         .RORA => {
+            self.P.c_carry = @truncate(self.acc & 0x01);
+            self.acc = (self.acc >> 1) | (@as(u8, self.P.c_carry) << 7);
+            self.updateNZFlags(self.acc); // N is 0, Z is updated based on the accumulator
         },
-        .RTI => { 
+        .RTI => {
+            self.P = @bitCast(self.popFromStack());
+            const low_byte = self.popFromStack();
+            const high_byte = self.popFromStack();
+            self.pc = @as(u16, (@as(u16, high_byte) << 8) | low_byte);
         },
         .RTS => {
+            const low_byte = self.popFromStack();
+            const high_byte = self.popFromStack();
+            self.pc = @as(u16, ((@as(u16, high_byte) << 8) | low_byte) +% 1);
         },
         .SBC => {
+            const operand: u8 = self.bus.readByte(address);
+            const carry: u8 = @as(u8, 1 - self.P.c_carry); // 1 if C == 0, 0 if C == 1 (inverted carry)
+            const old_acc = self.acc;
+            
+            const result: u16 = @as(u16, old_acc) -% @as(u16, operand) -% @as(u16, carry);
+            
+            // Update the accumulator
+            self.acc = @as(u8, @truncate(result));
+
+            // Update status flags
+            self.updateNZFlags(self.acc);
+
+            // Update carry flag (borrow flag)
+            self.P.c_carry = if (result <= 0xFF) 1 else 0; // Clear if borrow occurs
+
+            // Update overflow flag: if the sign of the result is different from the sign of both the accumulator and the operand
+            self.P.v_overflow = @as(u1, @truncate(((old_acc ^ self.acc) & (old_acc ^ operand)) >> 7));
         },
         .SEC => {
+            self.P.c_carry = 1;
         },
         .SED => {
+            self.P.d_decimal = 1; // nes has no decimal mode
         },
         .SEI => {
+            self.P.i_interrupt_disable = 1;
         },
         .STA => {
+            self.bus.writeByte(address, self.acc);
         },
         .STX => {
+            self.bus.writeByte(address, self.X);
         },
         .STY => {
+            self.bus.writebyte(address, self.Y);
         },
         .TAX => {
+            self.X = self.acc;
+            self.updateNZFlags(self.X);
         },
         .TAY => {
+            self.Y = self.acc;
+            self.updateNZFlags(self.Y);
         },
         .TSX => {
+            self.X = self.sp;
+            self.updateNZFlags(self.X);
         },
         .TXA => {
+            self.acc = self.X;
+            self.updateNZFlags(self.acc);
         },
         .TXS => {
+            self.sp = self.X;
         },
         .TYA => {
+            self.acc = self.Y;
+            self.updateNZFlags(self.acc);
         },
         else => {
             std.debug.print("Unimplemented opcode: {}\n", .{i.opcode});
