@@ -48,13 +48,29 @@ pub fn init(bus: *Bus) CPU6502 {
     return cpu6592;
 }
 
+// After we push, the stack pointer will point to the next free spot on the stack
+fn pushToStack(self: *CPU6502, value: u8) void {
+    self.bus.writeByte(0x0100 +% self.sp, value);
+    self.sp -%= 1;
+}
+
+// When we pop, the stack pointer is pointing to a free spot on the stack, so we
+// add one, to get the last value pushed, and return it, this value stays on the stack,
+// but it doesn't count as being on the stack, since the stack pointer is now pointing to it,
+// meaning it's a free spot
+fn popFromStack(self: *CPU6502) u8 {
+    self.sp +%= 1;
+    return self.bus.readByte(0x0100 +% self.sp);
+} 
+
 // TODO NUMBER OF CYCLES, BASED ON P AND T (https://www.pagetable.com/c64ref/6502/?tab=2#)
 pub fn step(self: *CPU6502) void {
     const opcode = self.bus.readByte(self.pc);
-    self.pc+=1;
+    self.pc+%=1;
 
     const i: instructions.Instruction = instructions.instruction_set[opcode];
     var address: u16 = 0;
+    // if page is crossed, there are three addressing modes that add a cycle
     var page_crossed = false;
 
     // Decode addressing mode TODO CHECK IF THIS IS CORRECT
@@ -64,7 +80,7 @@ pub fn step(self: *CPU6502) void {
         },
         .IMMEDIATE => {
             address = self.pc;
-            self.pc += 1;
+            self.pc +%= 1;
         },
         .IMPLIED => {},
 
@@ -72,20 +88,20 @@ pub fn step(self: *CPU6502) void {
         .RELATIVE => {
             const offset: i8 = @bitCast(self.bus.readByte(self.pc));
             address = @bitCast(@as(i16, @bitCast(self.pc)) +% @as(i16, offset) +% 1); // todo check if this is correct
-            self.pc += 1;
+            self.pc +%= 1;
         },
         .ABSOLUTE => {
             address = self.bus.readWord(self.pc);
-            self.pc += 2;
+            self.pc +%= 2;
         },
         .ZEROPAGE => {
             address = @as(u16, self.bus.readByte(self.pc));
-            self.pc += 1;
+            self.pc +%= 1;
         },
         .INDIRECT => {
             const pointer = self.bus.readWord(self.pc);
             address = self.bus.readWord(pointer);
-            self.pc += 2;
+            self.pc +%= 2;
         },
 
         // Indexed Memory Ops
@@ -95,34 +111,34 @@ pub fn step(self: *CPU6502) void {
             address = base +% self.X;
             // if we overflow the last 256bytes then we crossed a page
             page_crossed = (address & 0xFF00) != (base & 0xFF00);
-            self.pc += 2;
+            self.pc +%= 2;
         },
         .ABSOLUTE_Y => {
             const base = self.bus.readWord(self.pc);
             address = base +% @as(u16, self.Y);
             // if we overflow the last 256bytes then we crossed a page
             page_crossed = (address & 0xFF00) != (base & 0xFF00);
-            self.pc += 2;
+            self.pc +%= 2;
         },
         .ZEROPAGE_X => {
             address = @as(u16, self.bus.readByte(self.pc) +% self.X) & 0x00FF;
-            self.pc += 1;
+            self.pc +%= 1;
         },
         .ZEROPAGE_Y => {
             address = @as(u16, self.bus.readByte(self.pc) +% self.Y) & 0x00FF;
-            self.pc += 1;
+            self.pc +%= 1;
         },
         .INDEXED_INDIRECT => {
             const pointer = @as(u16, self.bus.readByte(self.pc) +% self.X) & 0x00FF;
             address = self.bus.readWord(pointer);
-            self.pc += 1;
+            self.pc +%= 1;
         },
         .INDIRECT_INDEXED => {
             const pointer = self.bus.readByte(self.pc);
             const base = self.bus.readWord(pointer);
             address = base +% @as(u16, self.Y);
             page_crossed = (address & 0xFF00) != (base & 0xFF00);
-            self.pc += 1;
+            self.pc +%= 1;
         },
     }
 
@@ -201,13 +217,13 @@ pub fn step(self: *CPU6502) void {
             }
         },
         .BRK => {
+            const return_address: u16 = self.pc +% 1;
+
             // Push the high byte of the PC to the stack
-            self.bus.writeByte(0x0100 + self.sp, @truncate(return_address >> 8));
-            self.sp -= 1;
+            self.pushToStack(@truncate(return_address >> 8));
 
             // Push the low byte of the PC to the stack
-            self.bus.writeByte(0x0100 + self.sp, @truncate(return_address & 0xFF));
-            self.sp -= 1;
+            self.pushToStack(@truncate(return_address & 0xFF));
 
             // Set the break flag in the status register
             self.P.b_break = 1;
@@ -223,8 +239,7 @@ pub fn step(self: *CPU6502) void {
             status_register |= @as(u8, self.P.z_zero) << 1;
             status_register |= @as(u8, self.P.c_carry);
             
-            self.bus.writeByte(0x0100 + self.sp, status_register);
-            self.sp -= 1;
+            self.pushToStack(status_register);
 
             // Set the interrupt disable flag to prevent further interrupts
             self.P.i_interrupt_disable = 1;
@@ -259,7 +274,7 @@ pub fn step(self: *CPU6502) void {
         },
         .CMP => {
             const operand: u8 = self.bus.readByte(address);
-            self.updateNZFlags(self.acc - operand);
+            self.updateNZFlags(self.acc -% operand);
             if(self.acc >= operand) {
                 self.P.c_carry = 1;
             } else {
@@ -268,7 +283,7 @@ pub fn step(self: *CPU6502) void {
         },
         .CPX => {
             const operand: u8 = self.bus.readByte(address);
-            self.updateNZFlags(self.X - operand);
+            self.updateNZFlags(self.X -% operand);
             if(self.X >= operand) {
                 self.P.c_carry = 1;
             } else {
@@ -277,7 +292,7 @@ pub fn step(self: *CPU6502) void {
         },
         .CPY => {
             const operand: u8 = self.bus.readByte(address);
-            self.updateNZFlags(self.Y - operand);
+            self.updateNZFlags(self.Y -% operand);
             if(self.Y >= operand) {
                 self.P.c_carry = 1;
             } else {
@@ -300,9 +315,8 @@ pub fn step(self: *CPU6502) void {
         },
         .EOR => {
             const operand = self.bus.readByte(address);   
-            const result = self.acc ^ operand;
-            self.acc = result;
-            self.updateNZFlags(result);
+            self.acc = self.acc ^ operand;
+            self.updateNZFlags(self.acc);
         },
         .INC => {
             const operand: u8 = self.bus.readByte(address);
@@ -322,18 +336,89 @@ pub fn step(self: *CPU6502) void {
             self.pc = address;
         },
         .JSR => { // this instruction doesn't push the address of the next instruction to the stack, it pushes the address of the last byte of the instruction itself (it's a 3 byte instruction) and expects the RTS instruction to add 1 to that address when popping it's value from the stack to resume execution
-            const return_address = self.pc - 1; // Subtract 1 from PC
+            const return_address = self.pc -% 1; // Subtract 1 from PC
 
             // Push the high byte of the return address to the stack
-            self.bus.writeByte(0x0100 + self.sp, @truncate(return_address >> 8));
-            self.sp -= 1;
+            self.pushToStack(@truncate(return_address >> 8));
 
             // Push the low byte of the return address to the stack
-            self.bus.writeByte(0x0100 + self.sp, @truncate(return_address & 0xFF));
-            self.sp -= 1;
+            self.pushToStack(@truncate(return_address & 0xFF));
 
             // Jump to the subroutine address
             self.pc = address;
+        },
+        .LDA => {
+            self.acc = self.bus.readByte(address);    
+            self.updateNZFlags(self.acc);
+        },
+        .LDX => {
+            self.X = self.bus.readByte(address);
+            self.updateNZFlags(self.X);
+        },
+        .LDY => {
+            self.Y = self.bus.readByte(address);
+            self.updateNZFlags(self.Y);
+        },
+        .LSR => {
+            const operand = self.bus.readByte(address);
+            self.P.c_carry = @truncate(operand & 0x01);
+            const shifted_value = operand >> 1;
+            self.bus.writeByte(address, shifted_value);
+            self.updateNZFlags(shifted_value); // N is 0, Z is updated based on the result
+        },
+        .LSRA => {
+            self.P.c_carry = @truncate(self.acc & 0x01);
+            self.acc >>= 1;
+            self.updateNZFlags(self.acc); // N is 0, Z is updated based on the accumulator
+        },
+        .NOP => {},
+        .ORA => {
+        },
+        .PHA => {
+        },
+        .PHP => {
+        },
+        .PLA => { 
+        },
+        .PLP => {
+        },
+        .ROL => {
+        },
+        .ROLA => {                
+        },
+        .ROR => {
+        },
+        .RORA => {
+        },
+        .RTI => { 
+        },
+        .RTS => {
+        },
+        .SBC => {
+        },
+        .SEC => {
+        },
+        .SED => {
+        },
+        .SEI => {
+        },
+        .STA => {
+        },
+        .STX => {
+        },
+        .STY => {
+        },
+        .TAX => {
+        },
+        .TAY => {
+        },
+        .TSX => {
+        },
+        .TXA => {
+        },
+        .TXS => {
+        },
+        .TYA => {
         },
         else => {
             std.debug.print("Unimplemented opcode: {}\n", .{i.opcode});
