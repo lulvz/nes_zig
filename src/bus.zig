@@ -12,13 +12,10 @@ PPU: *PPU,
 APU: *APU,
 cartridge: *Cartridge,
 
-// PPU Registers are 8 bytes ($2000–$2007)
-// PPU_reg: [8]u8,
-// APU and I/O registers and APU and I/O functionality that is normally disabled
-// ($4000-$401F)
-// APU_reg: [32]u8,
-// Unmapped, reserved for cartridge ($4020-$FFFF)
-// CART: [49_120]u8,
+test_ram: [1024*64]u8,
+
+read_fn: *const fn (self: *Bus, address: u16) u8,
+write_fn: *const fn (self: *Bus, address: u16, value: u8) void,
 
 pub fn init() Bus {
     const bus: Bus = .{
@@ -26,12 +23,46 @@ pub fn init() Bus {
         .PPU = undefined,
         .APU = undefined,
         .cartridge = undefined,
+        .test_ram = undefined,
+        .read_fn = standardReadByte,
+        .write_fn = standardWriteByte,
     };
 
     return bus;
 }
 
-pub fn readByte(self: *Bus, addr: u16) u8 {
+pub fn initTesting() Bus {
+    const bus: Bus = .{
+        .ram = undefined,
+        .PPU = undefined,
+        .APU = undefined,
+        .cartridge = undefined,
+        .test_ram = std.mem.zeroes([1024*64]u8),
+        .read_fn = testReadByte,
+        .write_fn = testWriteByte,
+    };
+
+    return bus; 
+}
+
+pub fn loadTestROM(self: *Bus, file_location: []const u8) !void {
+    var file = try std.fs.cwd().openFile(file_location, .{});
+    defer file.close();
+
+    const file_size = try file.getEndPos();
+
+    // Create a dynamic buffer based on the file size
+    const buffer = try std.heap.page_allocator.alloc(u8, file_size);
+    defer std.heap.page_allocator.free(buffer);
+
+    // Read the file into the buffer
+    _ = try file.readAll(buffer);
+
+    // Copy the contents to the test RAM (ensure test_ram has enough space)
+    @memcpy(&self.test_ram, buffer);
+}
+
+fn standardReadByte(self: *Bus, addr: u16) u8 {
     return switch (addr) {
         0x0000...0x1FFF => self.ram[addr & 0x07FF],
         0x2000...0x3FFF => self.PPU.readRegister(addr & 0x0007),
@@ -40,13 +71,29 @@ pub fn readByte(self: *Bus, addr: u16) u8 {
     };
 }
 
-pub fn writeByte(self: *Bus, addr: u16, value: u8) void {
+fn testReadByte(self: *Bus, addr: u16) u8 {
+    return self.test_ram[addr];
+}
+
+pub fn readByte(self: *Bus, addr: u16) u8 {
+    return self.read_fn(self, addr);
+}
+
+fn standardWriteByte(self: *Bus, addr: u16, value: u8) void {
     switch (addr) {
         0x0000...0x1FFF => self.ram[addr & 0x07FF] = value,
         0x2000...0x3FFF => self.PPU.writeRegister(addr & 0x0007, value),
         0x4000...0x401F => self.APU.writeRegister(addr - 0x4000, value),// TODO FIX THESE VALUES TOO
         0x4020...0xFFFF => self.cartridge.writeByte(addr, value),
     }
+}
+
+fn testWriteByte(self: *Bus, addr: u16, value: u8) void {
+    self.test_ram[addr] = value;
+}
+
+pub fn writeByte(self: *Bus, addr: u16, value: u8) void {
+    self.write_fn(self, addr, value);
 }
 
 pub fn readWord(self: *Bus, addr: u16) u16 {

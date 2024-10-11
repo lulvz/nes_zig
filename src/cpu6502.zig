@@ -50,7 +50,7 @@ pub fn init(bus: *Bus) CPU6502 {
 
 // After we push, the stack pointer will point to the next free spot on the stack
 fn pushToStack(self: *CPU6502, value: u8) void {
-    self.bus.writeByte(0x0100 +% self.sp, value);
+    self.bus.writeByte(@as(u16, 0x0100 +% @as(u16, self.sp)), value);
     self.sp -%= 1;
 }
 
@@ -247,7 +247,7 @@ pub fn step(self: *CPU6502) void {
             // Fetch the new PC from the interrupt vector (0xFFFE and 0xFFFF)
             const low_byte = self.bus.readByte(0xFFFE);
             const high_byte = self.bus.readByte(0xFFFF);
-            self.pc = @as(u16, (high_byte << 8) | low_byte);
+            self.pc = @as(u16, (@as(u16, high_byte) << 8) | low_byte);
             // TODO CHECK IF THIS ISRIGHT
         },
         .BVC => {
@@ -373,6 +373,7 @@ pub fn step(self: *CPU6502) void {
         },
         .NOP => {},
         .ORA => {
+
         },
         .PHA => {
         },
