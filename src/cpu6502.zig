@@ -63,7 +63,7 @@ fn pushToStack(self: *CPU6502, value: u8) void {
 // meaning it's a free spot
 fn popFromStack(self: *CPU6502) u8 {
     self.sp +%= 1;
-    return self.bus.readByte(0x0100 +% self.sp);
+    return self.bus.readByte(@as(u16, 0x0100 +% @as(u16, self.sp)));
 } 
 
 // TODO NUMBER OF CYCLES, BASED ON P AND T (https://www.pagetable.com/c64ref/6502/?tab=2#)
@@ -383,7 +383,7 @@ pub fn step(self: *CPU6502) void {
             self.updateNZFlags(self.acc);
         },
         .PLP => {
-            self.P = self.popFromStack();
+            self.P = @bitCast(self.popFromStack());
         },
         .ROL => {
             const operand = self.bus.readByte(address);
@@ -455,7 +455,7 @@ pub fn step(self: *CPU6502) void {
             self.bus.writeByte(address, self.X);
         },
         .STY => {
-            self.bus.writebyte(address, self.Y);
+            self.bus.writeByte(address, self.Y);
         },
         .TAX => {
             self.X = self.acc;
@@ -497,4 +497,8 @@ fn updateNZFlags(self: *CPU6502, value: u8) void {
     } else {
         self.P.n_negative = 0; // Clear negative flag
     }
+}
+
+pub fn reset() void {
+
 }

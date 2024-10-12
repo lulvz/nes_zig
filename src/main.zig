@@ -2,18 +2,31 @@ const std = @import("std");
 const rl = @import("raylib");
 
 const Bus = @import("bus.zig");
+const PPUBus = @import("ppu_bus.zig");
 const CPU6502 = @import("cpu6502.zig");
+const PPU = @import("ppu.zig");
+const APU = @import("apu.zig");
+const Cartridge = @import("cartridge.zig");
 
 pub fn main() anyerror!void {
     try run6502Test();
 }
 
 pub fn run6502Test() anyerror!void {
-    // Initialize an empty bus and CPU, set the CPU's program counter (PC) to 0x0200.
-    var bus = Bus.initTesting();
+    // init main bus and ppu bus
+    var cpu: CPU6502 = undefined;
+    var ppu: PPU = undefined;
+    var apu: APU = undefined;
+    var cartridge: Cartridge = undefined;
+    var ppu_bus = PPUBus.init(&cartridge);
+    var bus = Bus.initTesting(&cpu, &ppu, &apu, &cartridge);
+
+    // init cpu and ppu (eventually apu probably)
+    cpu = CPU6502.init(&bus);
+    ppu = PPU.init(&bus, &ppu_bus); 
+    cpu.pc = 0x0400;
+
     try bus.loadTestROM("test_bin/6502_functional_test.bin");
-    var cpu = CPU6502.init(&bus);
-    cpu.pc = 0xC000;
 
     const screenWidth = 800;
     const screenHeight = 450;
@@ -29,15 +42,15 @@ pub fn run6502Test() anyerror!void {
 
     while (!rl.windowShouldClose()) { 
         // Update
-        if (rl.isKeyPressed(rl.KeyboardKey.key_space)) {
+        if (rl.isKeyDown(rl.KeyboardKey.key_space)) {
             // Step the CPU by executing the next instruction when space is pressed.
             cpu.step();
             step = true; // Set the flag indicating a step was performed.
         }
-        if (rl.isKeyPressed(rl.KeyboardKey.key_up) and memoryViewStart >= 16) {
+        if (rl.isKeyDown(rl.KeyboardKey.key_up) and memoryViewStart >= 16) {
             memoryViewStart -= 16;
         }
-        if (rl.isKeyPressed(rl.KeyboardKey.key_down) and memoryViewStart <= 0xFFF0) {
+        if (rl.isKeyDown(rl.KeyboardKey.key_down) and memoryViewStart <= 0xFFF0) {
             memoryViewStart += 16;
         }
 
