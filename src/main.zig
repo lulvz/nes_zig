@@ -8,12 +8,22 @@ const PPU = @import("ppu.zig");
 const APU = @import("apu.zig");
 const Cartridge = @import("cartridge.zig");
 
+const WINDOW_WIDTH = 1200;
+const WINDOW_HEIGHT = 900;
+const NES_WIDTH = 256;
+const NES_HEIGHT = 240;
+const DEBUG_PANEL_WIDTH = 430;
+const GAME_SCALE = 3;
+
+const FG_COLOR = rl.Color.ray_white;
+const FG_ACCENT_COLOR = rl.Color.beige;
+const BG_COLOR = rl.Color.dark_gray;
+
 pub fn main() anyerror!void {
     try run6502Test();
 }
 
 pub fn run6502Test() anyerror!void {
-    // init main bus and ppu bus
     var cpu: CPU6502 = undefined;
     var ppu: PPU = undefined;
     var apu: APU = undefined;
@@ -21,133 +31,134 @@ pub fn run6502Test() anyerror!void {
     var ppu_bus = PPUBus.init(&cartridge);
     var bus = Bus.initTesting(&cpu, &ppu, &apu, &cartridge);
 
-    // init cpu and ppu (eventually apu probably)
     cpu = CPU6502.init(&bus);
     ppu = PPU.init(&bus, &ppu_bus); 
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator(); 
+    cartridge = try Cartridge.init("test_bin/nestest.nes", allocator);
+    defer cartridge.deinit(allocator);
+
     cpu.pc = 0x0400;
 
     try bus.loadTestROM("test_bin/6502_functional_test.bin");
 
-    const screenWidth = 800;
-    const screenHeight = 450;
+    try initAndRunWindow(&cpu, &bus);
+}
 
-    // Initialize Raylib window.
-    rl.initWindow(screenWidth, screenHeight, "6502 Test Environment");
+fn initAndRunWindow(cpu: *CPU6502, bus: *Bus) !void {
+    rl.initWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "NES Emulator");
     defer rl.closeWindow();
 
     rl.setTargetFPS(60);
 
-    var step: bool = false; // Flag to track if we should step the CPU.
-    var memoryViewStart: u16 = 0x0000; // Start address for memory view
+    var step: bool = false;
+    var memoryViewStart: u16 = 0x0000;
+
+    // Create a render texture to act as our game screen
+    var target = rl.loadRenderTexture(NES_WIDTH, NES_HEIGHT);
+    defer rl.unloadRenderTexture(target);
 
     while (!rl.windowShouldClose()) { 
-        // Update
-        if (rl.isKeyDown(rl.KeyboardKey.key_space)) {
-            // Step the CPU by executing the next instruction when space is pressed.
-            cpu.step();
-            step = true; // Set the flag indicating a step was performed.
-        }
-        if (rl.isKeyDown(rl.KeyboardKey.key_up) and memoryViewStart >= 16) {
-            memoryViewStart -= 16;
-        }
-        if (rl.isKeyDown(rl.KeyboardKey.key_down) and memoryViewStart <= 0xFFF0) {
-            memoryViewStart += 16;
-        }
-
-        // Draw
-        rl.beginDrawing();
-        defer rl.endDrawing();
-
-        rl.clearBackground(rl.Color.ray_white);
-
-        // Display CPU state for debugging.
-        rl.drawText("6502 CPU Test", 10, 10, 20, rl.Color.dark_gray);
-        rl.drawText("Press SPACE to step through the next instruction.", 10, 40, 20, rl.Color.gray);
-        
-        // Display program counter (PC) and other registers (e.g., A, X, Y, status flags).
-        const textSize = 20;
-        const spacing = 25;
-        rl.drawText("CPU Registers:", 10, 80, textSize, rl.Color.black);
-        rl.drawText("PC: ", 10, 80 + spacing * 1, textSize, rl.Color.black);
-        rl.drawText(rl.textFormat("0x%04x", .{cpu.pc}), 100, 80 + spacing * 1, textSize, rl.Color.black);
-        rl.drawText("acc: ", 10, 80 + spacing * 2, textSize, rl.Color.black);
-        rl.drawText(rl.textFormat("0x%04x", .{cpu.acc}), 100, 80 + spacing * 2, textSize, rl.Color.black);
-        rl.drawText("X: ", 10, 80 + spacing * 3, textSize, rl.Color.black);
-        rl.drawText(rl.textFormat("0x%04x", .{cpu.X}), 100, 80 + spacing * 3, textSize, rl.Color.black);
-        rl.drawText("Y: ", 10, 80 + spacing * 4, textSize, rl.Color.black);
-        rl.drawText(rl.textFormat("0x%04x", .{cpu.Y}), 100, 80 + spacing * 4, textSize, rl.Color.black);
-        // rl.drawText("Status: ", 10, 80 + spacing * 5, textSize, rl.Color.black);
-        // rl.drawText(std.fmt.format("{b}", cpu.status), 100, 80 + spacing * 5, textSize, rl.Color.black);
-
-        rl.drawText("Memory:", 10, 220, textSize, rl.Color.black);
-        var y: i32 = 250;
-        var addr: u16 = memoryViewStart;
-        while (y < screenHeight - 30 and addr < 0x10000) : (y += spacing) {
-            const addrText = rl.textFormat("0x%04X:", .{addr});
-            rl.drawText(addrText, 10, y, textSize, rl.Color.black);
-
-            var x: i32 = 100;
-            for (0..8) |i| {
-                if (addr + i < 0x10000) {
-                    const byteText = rl.textFormat("%02X", .{bus.readByte(addr + @as(u16, @intCast(i)))});
-                    rl.drawText(byteText, x, y, textSize, rl.Color.black);
-                    x += 30;
-                }
-            }
-            addr += 8;
-        }
-
-        if (step) {
-            rl.drawText("Stepped!", screenWidth - 120, screenHeight - 40, textSize, rl.Color.green);
-            step = false;
-        }
-
-        if (step) {
-            rl.drawText("Stepped!", screenWidth - 120, screenHeight - 40, textSize, rl.Color.green);
-
-            // update the value of the registers to display
-            step = false; // Reset step flag after drawing.
-        }
+        handleInput(cpu, &step, &memoryViewStart);
+        updateGameScreen(&target);
+        drawFrame(cpu, bus, step, memoryViewStart, target);
+        step = false;
     }
 }
 
+fn handleInput(cpu: *CPU6502, step: *bool, memoryViewStart: *u16) void {
+    if (rl.isKeyDown(rl.KeyboardKey.key_space)) {
+        cpu.step();
+        step.* = true;
+    }
+    if (rl.isKeyDown(rl.KeyboardKey.key_up) and memoryViewStart.* >= 16) {
+        memoryViewStart.* -= 16;
+    }
+    if (rl.isKeyDown(rl.KeyboardKey.key_down) and memoryViewStart.* <= 0xFFF0) {
+        memoryViewStart.* += 16;
+    }
+}
 
-pub fn runWindow() anyerror!void {
-    // Initialization
-    //--------------------------------------------------------------------------------------
-    const screenWidth = 800;
-    const screenHeight = 450;
+fn updateGameScreen(target: *rl.RenderTexture2D) void {
+    rl.beginTextureMode(target.*);
+    defer rl.endTextureMode();
 
-    rl.initWindow(screenWidth, screenHeight, "raylib-zig [core] example - basic window");
-    defer rl.closeWindow();
+    rl.clearBackground(rl.Color.black);
+    // TODO
+}
 
-    // load shader
-    // const fragShader: rl.Shader = rl.loadShader(0, "../resources/shaders/display.frag");
+fn drawFrame(cpu: *CPU6502, bus: *Bus, step: bool, memoryViewStart: u16, target: rl.RenderTexture2D) void {
+    rl.beginDrawing();
+    defer rl.endDrawing();
 
-    // Set the frag shader value for the texture
-    // SetShaderValueTexture
+    rl.clearBackground(BG_COLOR);
 
-    rl.setTargetFPS(60);
+    // Draw the scaled game screen
+    const scaledWidth = @as(i32, NES_WIDTH) * GAME_SCALE;
+    const scaledHeight = @as(i32, NES_HEIGHT) * GAME_SCALE;
+    const sourceRec = rl.Rectangle{ .x = 0, .y = 0, .width = @as(f32, NES_WIDTH), .height = -@as(f32, NES_HEIGHT) };
+    const destRec = rl.Rectangle{ .x = 0, .y = 0, .width = @as(f32, scaledWidth), .height = @as(f32, scaledHeight) };
+    rl.drawTexturePro(target.texture, sourceRec, destRec, .{ .x = 0, .y = 0 }, 0, rl.Color.white);
+    rl.drawText("NES Screen", 10, NES_HEIGHT*GAME_SCALE+10, 20, FG_ACCENT_COLOR);
 
-    //--------------------------------------------------------------------------------------
+    drawDebugPanel(cpu, bus, step, memoryViewStart);
+}
 
-    // Main game loop
-    while (!rl.windowShouldClose()) { // Detect window close button or ESC key
-        // Update
-        //----------------------------------------------------------------------------------
-        // TODO: Update your variables here
-        //----------------------------------------------------------------------------------
+fn drawDebugPanel(cpu: *CPU6502, bus: *Bus, step: bool, memoryViewStart: u16) void {
+    const debugPanelX = WINDOW_WIDTH - DEBUG_PANEL_WIDTH;
+    rl.drawLine(debugPanelX, 0, debugPanelX, WINDOW_HEIGHT, FG_ACCENT_COLOR);
 
+    drawInstructions(debugPanelX);
+    drawCPUState(cpu, debugPanelX);
+    drawMemoryView(bus, memoryViewStart, debugPanelX);
+    
+    if (step) {
+        rl.drawText("Stepped!", WINDOW_WIDTH - 120, WINDOW_HEIGHT - 40, 20, rl.Color.green);
+    }
+}
 
-        // Draw
-        //----------------------------------------------------------------------------------
-        rl.beginDrawing();
-        defer rl.endDrawing();
+fn drawInstructions(baseX: i32) void {
+    rl.drawText("NES Emulator Debug", baseX + 10, 10, 20, rl.Color.dark_gray);
+    rl.drawText("SPACE: Step | UP/DOWN: Scroll Memory", baseX + 10, 40, 20, FG_ACCENT_COLOR);
+}
 
-        rl.clearBackground(rl.Color.white);
+fn drawCPUState(cpu: *CPU6502, baseX: i32) void {
+    const textSize = 20;
+    const spacing = 25;
+    const x = baseX + 10;
+    const baseY = 80;
 
+    rl.drawText("CPU Registers:", x, baseY, textSize, FG_COLOR);
+    rl.drawText(rl.textFormat("PC: 0x%04x", .{cpu.pc}), x, baseY + spacing * 1, textSize, FG_COLOR);
+    rl.drawText(rl.textFormat("A:  0x%02x", .{cpu.acc}), x, baseY + spacing * 2, textSize, FG_COLOR);
+    rl.drawText(rl.textFormat("X:  0x%02x", .{cpu.X}), x, baseY + spacing * 3, textSize, FG_COLOR);
+    rl.drawText(rl.textFormat("Y:  0x%02x", .{cpu.Y}), x, baseY + spacing * 4, textSize, FG_COLOR);
+    rl.drawText(rl.textFormat("P: nvxbdizc", .{}), x, baseY + spacing * 5, textSize, FG_COLOR);
+    rl.drawText(rl.textFormat("   %08b", .{@as(u8, @bitCast(cpu.P))}), x, baseY + spacing * 6, textSize, FG_COLOR);
+}
 
+fn drawMemoryView(bus: *Bus, memoryViewStart: u16, baseX: i32) void {
+    const textSize = 20;
+    const spacing = 25;
+    const x = baseX + 10;
+    const baseY = 250;
 
-        //----------------------------------------------------------------------------------
+    rl.drawText("Memory:", x, baseY, textSize, FG_COLOR);
+    var y: i32 = baseY + 30;
+    var addr: u16 = memoryViewStart;
+    while (y < WINDOW_HEIGHT - 30 and addr < 0x10000) : (y += spacing) {
+        const addrText = rl.textFormat("0x%04X:", .{addr});
+        rl.drawText(addrText, x, y, textSize, FG_COLOR);
+
+        var byteX: i32 = x + 90;
+        for (0..8) |i| {
+            if (addr + i < 0x10000) {
+                const byteText = rl.textFormat("%02X", .{bus.readByte(addr + @as(u16, @intCast(i)))});
+                rl.drawText(byteText, byteX, y, textSize, FG_COLOR);
+                byteX += 30;
+            }
+        }
+        addr += 8;
     }
 }
