@@ -54,7 +54,7 @@ fn initAndRunWindow(cpu: *CPU6502, bus: *Bus) !void {
     rl.setTargetFPS(60);
 
     var step: bool = false;
-    var memoryViewStart: u16 = 0x8000;
+    var memoryViewStart: u16 = 0x0100;
 
     // Create a render texture to act as our game screen
     var target = rl.loadRenderTexture(NES_WIDTH, NES_HEIGHT);

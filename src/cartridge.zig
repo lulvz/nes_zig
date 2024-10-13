@@ -86,16 +86,10 @@ pub fn init(rom_path: []const u8, allocator: std.mem.Allocator) !Cartridge {
     @memcpy(PrgROM, buffer[prg_start..prg_start+prg_rom_size]);
     @memcpy(ChrROM, buffer[prg_start+prg_rom_size..prg_start+prg_rom_size+chr_rom_size]);
 
-    var mapper: Mapper = undefined;
-    switch(mapper_id) {
-        0 => {
-            mapper = Mapper{.NROM = NROM{.PrgROM = PrgROM, .ChrROM = ChrROM, .prg_rom_units = header.prg_rom_units, .chr_rom_units = header.chr_rom_units}};
-        },
-        else => {
-            std.debug.print("Mapper not implemented: {d}\n", .{mapper_id});
-            return error.MapperNotImplemented;
-        }
-    }
+    const mapper = switch(mapper_id) {
+        0 => Mapper{.NROM = NROM{.PrgROM = PrgROM, .ChrROM = ChrROM, .prg_rom_units = header.prg_rom_units, .chr_rom_units = header.chr_rom_units}},
+        else => {std.debug.print("Mapper not implemented: {d}\n", .{mapper_id}); return error.UnsupportedMapper;},
+    };
 
     return .{
         .header = header,

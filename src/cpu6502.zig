@@ -68,7 +68,7 @@ fn popFromStack(self: *CPU6502) u8 {
 pub fn step(self: *CPU6502) void {
     if (self.nmi) {
         self.handleNMI();
-    } else if (self.irq and self.P.i_interrupt_disable == 0) {
+    } else if (self.irq and (self.P.i_interrupt_disable == 0)) {
         self.handleIRQ();
     }
 
