@@ -29,7 +29,7 @@ pub fn run6502Test() anyerror!void {
     var apu: APU = undefined;
     var cartridge: Cartridge = undefined;
     var ppu_bus = PPUBus.init(&cartridge);
-    var bus = Bus.initTesting(&cpu, &ppu, &apu, &cartridge);
+    var bus = Bus.init(&cpu, &ppu, &apu, &cartridge);
 
     cpu = CPU6502.init(&bus);
     ppu = PPU.init(&bus, &ppu_bus); 
@@ -37,11 +37,12 @@ pub fn run6502Test() anyerror!void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator(); 
     cartridge = try Cartridge.init("test_bin/nestest.nes", allocator);
-    defer cartridge.deinit(allocator);
+    defer cartridge.deinit();
+    cartridge.printHeader();
 
-    cpu.pc = 0x0400;
+    cpu.pc = 0xC000;
 
-    try bus.loadTestROM("test_bin/6502_functional_test.bin");
+    // try bus.loadTestROM("test_bin/6502_functional_test.bin");
 
     try initAndRunWindow(&cpu, &bus);
 }
@@ -53,7 +54,7 @@ fn initAndRunWindow(cpu: *CPU6502, bus: *Bus) !void {
     rl.setTargetFPS(60);
 
     var step: bool = false;
-    var memoryViewStart: u16 = 0x0000;
+    var memoryViewStart: u16 = 0x8000;
 
     // Create a render texture to act as our game screen
     var target = rl.loadRenderTexture(NES_WIDTH, NES_HEIGHT);

@@ -21,12 +21,13 @@ P: packed struct { // processor status (packed structs are cool)
     n_negative: u1,
 },
 
-screen: [256*240]u8, // 56 colors per pixel (could be u6)
-
 bus: *Bus,
 
+irq: bool,
+nmi: bool,
+
 pub fn init(bus: *Bus) CPU6502 {
-    var cpu6592 = CPU6502{
+    return .{
         .pc = 0xfffc,
         .sp = 0xFF,
         .acc = 0x0,
@@ -42,13 +43,10 @@ pub fn init(bus: *Bus) CPU6502 {
             .v_overflow = 0x0,
             .n_negative = 0x0,
         },
-        .screen = undefined,
         .bus = bus,
+        .irq = false,
+        .nmi = false,
     };
-
-    @memset(&cpu6592.screen, 0x0);
-
-    return cpu6592;
 }
 
 // After we push, the stack pointer will point to the next free spot on the stack
@@ -68,6 +66,12 @@ fn popFromStack(self: *CPU6502) u8 {
 
 // TODO NUMBER OF CYCLES, BASED ON P AND T (https://www.pagetable.com/c64ref/6502/?tab=2#)
 pub fn step(self: *CPU6502) void {
+    if (self.nmi) {
+        self.handleNMI();
+    } else if (self.irq and self.P.i_interrupt_disable == 0) {
+        self.handleIRQ();
+    }
+
     const opcode = self.bus.readByte(self.pc);
     self.pc+%=1;
 
@@ -499,6 +503,36 @@ fn updateNZFlags(self: *CPU6502, value: u8) void {
     }
 }
 
-pub fn reset() void {
+pub fn triggerNMI(self: *CPU6502) void {
+    self.nmi = true;
+}
 
+pub fn triggerIRQ(self: *CPU6502) void {
+    self.irq = true;
+}
+
+fn handleNMI(self: *CPU6502) void {
+    self.nmi = false;
+    self.pushToStack(@truncate(self.pc >> 8));
+    self.pushToStack(@truncate(self.pc & 0xFF));
+    self.pushToStack(@bitCast(self.P));
+    self.P.i_interrupt_disable = 1;
+    self.pc = self.bus.readWord(0xFFFA);
+}
+
+fn handleIRQ(self: *CPU6502) void {
+    self.irq = false;
+    self.pushToStack(@truncate(self.pc >> 8));
+    self.pushToStack(@truncate(self.pc & 0xFF));
+    self.pushToStack(@bitCast(self.P));
+    self.P.i_interrupt_disable = 1;
+    self.pc = self.bus.readWord(0xFFFE);
+}
+
+pub fn reset(self: *CPU6502) void {
+    self.sp = 0xFF;
+    self.P.i_interrupt_disable = 1;
+    self.pc = self.bus.readWord(0xFFFC);
+    self.irq_pending = false;
+    self.nmi_pending = false;
 }

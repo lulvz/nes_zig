@@ -76,7 +76,7 @@ pub fn loadTestROM(self: *Bus, file_location: []const u8) !void {
 fn standardReadByte(self: *Bus, addr: u16) u8 {
     return switch (addr) {
         0x0000...0x1FFF => self.ram[addr & 0x07FF],
-        0x2000...0x3FFF => self.ppu.readRegister(addr & 0x0007), // ppu registers from $00 to $07
+        0x2000...0x3FFF => self.ppu.readRegister(@truncate(addr & 0x0007)), // ppu registers from $00 to $07
         0x4000...0x401F => self.apu.readRegister(addr - 0x4000),// TODO FIX THESE VALUES
         0x4020...0xFFFF => self.cartridge.readByte(addr),
     };
@@ -89,7 +89,7 @@ fn testReadByte(self: *Bus, addr: u16) u8 {
 fn standardWriteByte(self: *Bus, addr: u16, value: u8) void {
     switch (addr) {
         0x0000...0x1FFF => self.ram[addr & 0x07FF] = value,
-        0x2000...0x3FFF => self.ppu.writeRegister(addr & 0x0007, value),
+        0x2000...0x3FFF => self.ppu.writeRegister(@truncate(addr & 0x0007), value),
         0x4000...0x401F => self.apu.writeRegister(addr - 0x4000, value),// TODO FIX THESE VALUES TOO
         0x4020...0xFFFF => self.cartridge.writeByte(addr, value),
     }

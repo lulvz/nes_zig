@@ -1,4 +1,6 @@
 const std = @import("std");
+const Mapper = @import("mappers/mapper.zig").Mapper;
+const NROM = @import("mappers/NROM.zig");
 const Cartridge = @This();
 
 header: Header,
@@ -6,6 +8,9 @@ mapper_id: u8,
 
 PrgROM: []u8,
 ChrROM: []u8,
+mapper: Mapper,
+
+allocator: std.mem.Allocator,
 
 // Least to most significant bit
 const Flags6 = packed struct {
@@ -21,9 +26,6 @@ const Flags7 = packed struct {
     upper_mapper_bits: u4,
     unused: u1,
 };
-const Flags8 = packed struct {
-    prg_ram_size: u8,             // Byte 8: PRG RAM size in 8KB units (if 0, assume 8KB)
-};
 const Flags9 = packed struct {
     tv_system: u1,                // Bit 0: TV system (0: NTSC, 1: PAL)
     unused: u7,
@@ -38,11 +40,11 @@ const Header = packed struct {
     magic1: u8,
     magic2: u8,
     magic3: u8,
-    prg_rom_size: u8,             // PRG ROM size in 16KB units
-    chr_rom_size: u8,             // CHR ROM size in 8KB units
+    prg_rom_units: u8,             // PRG ROM size in 16KB units
+    chr_rom_units: u8,             // CHR ROM size in 8KB units
     flags6: Flags6,               // Flags 6 (mirroring, mapper lower bits, etc.)
     flags7: Flags7,               // Flags 7 (mapper upper bits, console type, etc.)
-    flags8: Flags8,               // Flags 8 (PRG RAM size)
+    prg_ram_size: u8,               // Flags 8 (PRG RAM size)
     flags9: Flags9,               // Flags 9 (TV system)
     flags10: Flags10,             // Flags 10 (TV system, PRG RAM bus conflict)
     padding11: u8,
@@ -63,58 +65,75 @@ pub fn init(rom_path: []const u8, allocator: std.mem.Allocator) !Cartridge {
         return error.IncompleteRead;
     }
 
-    const header: Header = .{
-        .magic0 = buffer[0],
-        .magic1 = buffer[1],
-        .magic2 = buffer[2],
-        .magic3 = buffer[3],
-        .prg_rom_size = buffer[4],
-        .chr_rom_size = buffer[5],
-        .flags6 = @bitCast(buffer[6]),
-        .flags7 = @bitCast(buffer[7]),
-        .flags8 = @bitCast(buffer[8]),
-        .flags9 = @bitCast(buffer[9]),
-        .flags10 = @bitCast(buffer[10]),
-        .padding11 = buffer[11],
-        .padding12 = buffer[12],
-        .padding13 = buffer[13],
-        .padding14 = buffer[14],
-        .padding15 = buffer[15],
-    };
+    const header: Header = @bitCast(buffer[0..@sizeOf(Header)].*);
     const mapper_id: u8 = (@as(u8, header.flags7.upper_mapper_bits) << 4) | header.flags6.lower_mapper_bits;
-    const PrgROM = try allocator.alloc(u8, @as(usize, header.prg_rom_size) * (1024*16));
-    const ChrROM = try allocator.alloc(u8, @as(usize, header.chr_rom_size) * (1024*8));
+
+    var prg_start: usize = @sizeOf(Header);
+    if(header.flags6.trainer == 1) { // if trainer flag is set, add 512 bytes to the prg_start
+        prg_start += 512;
+    }
+    const prg_rom_size = @as(usize, header.prg_rom_units) * (1024*16);
+    const chr_rom_size =  @as(usize, header.chr_rom_units) * (1024*8);
+    if (file_size < prg_start + prg_rom_size + chr_rom_size) {
+        return error.InvalidROMSize;
+    }
+
+    const PrgROM = try allocator.alloc(u8, prg_rom_size);
+    errdefer allocator.free(PrgROM);
+    const ChrROM = try allocator.alloc(u8, chr_rom_size);
+    errdefer allocator.free(ChrROM);
+
+    @memcpy(PrgROM, buffer[prg_start..prg_start+prg_rom_size]);
+    @memcpy(ChrROM, buffer[prg_start+prg_rom_size..prg_start+prg_rom_size+chr_rom_size]);
+
+    var mapper: Mapper = undefined;
+    switch(mapper_id) {
+        0 => {
+            mapper = Mapper{.NROM = NROM{.PrgROM = PrgROM, .ChrROM = ChrROM, .prg_rom_units = header.prg_rom_units, .chr_rom_units = header.chr_rom_units}};
+        },
+        else => {
+            std.debug.print("Mapper not implemented: {d}\n", .{mapper_id});
+            return error.MapperNotImplemented;
+        }
+    }
 
     return .{
         .header = header,
         .mapper_id = mapper_id,
         .PrgROM = PrgROM,
         .ChrROM = ChrROM,
+        .mapper = mapper,
+        .allocator = allocator,
     };
 }
 
-pub fn deinit(self: *Cartridge, allocator: std.mem.Allocator) void {
-    allocator.free(self.PrgROM);
-    allocator.free(self.ChrROM);
+pub fn deinit(self: *Cartridge) void {
+    self.allocator.free(self.PrgROM);
+    self.allocator.free(self.ChrROM);
 }
 
-pub fn readByte(_: *Cartridge, _: u16) u8 {
-    return 0x00;
+pub fn readByte(self: *Cartridge, addr: u16) u8 {
+    return self.mapper.readByte(addr);
 }
 
-pub fn writeByte(_: *Cartridge, _: u16, _: u8) void {
-    return;
+pub fn writeByte(self: *Cartridge, addr: u16, value: u8) void {
+    self.mapper.writeByte(addr, value);
 }
 
+pub fn ppuReadByte(self: *Cartridge, addr: u14) u8 {
+    return self.mapper.ppuReadByte(addr);
+}
 
-
+pub fn ppuWriteByte(self: *Cartridge, addr: u14, value: u8) void {
+    self.mapper.ppuWriteByte(addr, value);
+}
 
 pub fn printHeader(self: *Cartridge) void {
     const header = self.header;
     std.debug.print("Header:\n", .{});
     std.debug.print("Magic: {x},{x},{x},{x}\n", .{header.magic0, header.magic1, header.magic2, header.magic3});
-    std.debug.print("PRG ROM Size: {d} KB\n", .{header.prg_rom_size * 16});
-    std.debug.print("CHR ROM Size: {d} KB\n", .{header.chr_rom_size * 8});
+    std.debug.print("PRG ROM Size: {d} KB\n", .{header.prg_rom_units * 16});
+    std.debug.print("CHR ROM Size: {d} KB\n", .{header.chr_rom_units * 8});
     std.debug.print("Flags6:\n", .{});
     std.debug.print("  Nametable Arrangement: {d}\n", .{header.flags6.nametable_arrangement});
     std.debug.print("  Battery-backed PRG RAM: {d}\n", .{header.flags6.battery_backed_prg_ram});
@@ -125,7 +144,7 @@ pub fn printHeader(self: *Cartridge) void {
     std.debug.print("  Console Type: {d}\n", .{header.flags7.console_type});
     std.debug.print("  NES 2.0 Format: {d}\n", .{header.flags7.ines2_format});
     std.debug.print("  Upper Mapper Bits: {d}\n", .{header.flags7.upper_mapper_bits});
-    std.debug.print("Flags8 - PRG RAM Size: {d} KB\n", .{header.flags8.prg_ram_size});
+    std.debug.print("PRG RAM Size: {d} KB\n", .{header.prg_ram_size});
     std.debug.print("Flags9 - TV System: {d}\n", .{header.flags9.tv_system});
     std.debug.print("Flags10:\n", .{});
     std.debug.print("  TV System: {d}\n", .{header.flags10.tv_system});
