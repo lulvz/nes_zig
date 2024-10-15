@@ -20,6 +20,7 @@ const FG_ACCENT_COLOR = rl.Color.beige;
 const BG_COLOR = rl.Color.dark_gray;
 
 pub fn main() anyerror!void {
+    // std.debug.print("Value of 5D -% 5D is {x}\n", .{0x5D -% 0x5D});
     try run6502Test();
 }
 
@@ -37,10 +38,12 @@ pub fn run6502Test() anyerror!void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator(); 
     cartridge = try Cartridge.init("test_bin/nestest.nes", allocator);
+    // cartridge = try Cartridge.init("test_bin/01-implied.nes", allocator);
     defer cartridge.deinit();
     cartridge.printHeader();
 
-    cpu.pc = 0xC000;
+    cpu.customReset(0xC000);
+    // cpu.reset();
 
     // try bus.loadTestROM("test_bin/6502_functional_test.bin");
 
@@ -48,19 +51,24 @@ pub fn run6502Test() anyerror!void {
 }
 
 fn initAndRunWindow(cpu: *CPU6502, bus: *Bus) !void {
+    const log = try std.fs.cwd().createFile("execution_log.log", .{});
+    const log_writer = log.writer();
     rl.initWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "NES Emulator");
     defer rl.closeWindow();
 
     rl.setTargetFPS(60);
 
     var step: bool = false;
-    var memoryViewStart: u16 = 0x0100;
+    var memoryViewStart: u16 = 0x0000;
 
     // Create a render texture to act as our game screen
     var target = rl.loadRenderTexture(NES_WIDTH, NES_HEIGHT);
     defer rl.unloadRenderTexture(target);
 
     while (!rl.windowShouldClose()) { 
+        try cpu.logCpuState(log_writer);
+        cpu.step();
+
         handleInput(cpu, &step, &memoryViewStart);
         updateGameScreen(&target);
         drawFrame(cpu, bus, step, memoryViewStart, target);

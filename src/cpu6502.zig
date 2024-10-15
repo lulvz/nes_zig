@@ -16,7 +16,7 @@ P: packed struct { // processor status (packed structs are cool)
     i_interrupt_disable: u1,
     d_decimal: u1, // not supported in the NES (thank god TT)
     b_break: u1,
-    no_cpu_effect: u1,
+    no_cpu_effect: u1, // is always set to 1
     v_overflow: u1,
     n_negative: u1,
 },
@@ -49,6 +49,11 @@ pub fn init(bus: *Bus) CPU6502 {
     };
 }
 
+pub fn logCpuState(self: *CPU6502, log_writer: anytype) !void {
+    try std.fmt.format(log_writer, "{X:04} {s} A:{X:0>2} X:{X:0>2} Y:{X:0>2} P:{X:0>2} SP:{X:0>2}\n", .{self.pc, @tagName(instructions.instruction_set[self.bus.readByte(self.pc)].opcode), self.acc, self.X, self.Y, @as(u8, @bitCast(self.P)), self.sp});
+    // try std.fmt.format(log_writer, "P:{X:0>2}\n", .{@as(u8, @bitCast(self.P))});
+}
+
 // After we push, the stack pointer will point to the next free spot on the stack
 fn pushToStack(self: *CPU6502, value: u8) void {
     self.bus.writeByte(@as(u16, 0x0100 +% @as(u16, self.sp)), value);
@@ -75,7 +80,7 @@ pub fn step(self: *CPU6502) void {
     const opcode = self.bus.readByte(self.pc);
     self.pc+%=1;
 
-    const i: instructions.Instruction = instructions.instruction_set[opcode];
+    const i = instructions.instruction_set[opcode];
     var address: u16 = 0;
     // if page is crossed, there are three addressing modes that add a cycle
     var page_crossed = false;
@@ -137,14 +142,16 @@ pub fn step(self: *CPU6502) void {
         },
         .INDEXED_INDIRECT => {
             const pointer = @as(u16, self.bus.readByte(self.pc) +% self.X) & 0x00FF;
-            address = self.bus.readWord(pointer);
+            const address_lo = self.bus.readByte(pointer);
+            const address_hi = self.bus.readByte((pointer +% 1) & 0x00FF);
+            address = @as(u16, address_hi)<<8 | address_lo;
             self.pc +%= 1;
         },
         .INDIRECT_INDEXED => {
-            const pointer = self.bus.readByte(self.pc);
-            const base = self.bus.readWord(pointer);
-            address = base +% @as(u16, self.Y);
-            page_crossed = (address & 0xFF00) != (base & 0xFF00);
+            const pointer = @as(u16, self.bus.readByte(self.pc));
+            const address_lo = self.bus.readByte(pointer);
+            const address_hi = self.bus.readByte((pointer +% 1) & 0x00FF);
+            address = (@as(u16, address_hi)<<8 | address_lo) +% self.Y;
             self.pc +%= 1;
         },
     }
@@ -240,6 +247,8 @@ pub fn step(self: *CPU6502) void {
             
             self.pushToStack(status_register);
 
+            self.P.b_break = 0;
+
             // Set the interrupt disable flag to prevent further interrupts
             self.P.i_interrupt_disable = 1;
 
@@ -273,11 +282,15 @@ pub fn step(self: *CPU6502) void {
         },
         .CMP => {
             const operand: u8 = self.bus.readByte(address);
-            self.updateNZFlags(self.acc -% operand);
-            if(self.acc >= operand) {
-                self.P.c_carry = 1;
-            } else {
-                self.P.c_carry = 0;
+            const result: u8 = self.acc -% operand;
+            
+            // Update N and Z flags based on the result
+            self.updateNZFlags(result);
+            
+            // Set carry flag if acc >= operand (which is equivalent to acc - operand >= 0 in unsigned arithmetic)
+            self.P.c_carry = if (operand <= self.acc) 1 else 0;
+            if(operand == 0x5D) {
+                std.debug.print("Operand is 0x5D, accumulator is: {x}", .{self.acc});
             }
         },
         .CPX => {
@@ -380,7 +393,7 @@ pub fn step(self: *CPU6502) void {
             self.pushToStack(self.acc);
         },
         .PHP => {
-            self.pushToStack(@bitCast(self.P));
+            self.pushToStack(@as(u8, @bitCast(self.P)) | 0b00110000);
         },
         .PLA => { 
             self.acc = self.popFromStack();
@@ -388,6 +401,8 @@ pub fn step(self: *CPU6502) void {
         },
         .PLP => {
             self.P = @bitCast(self.popFromStack());
+            self.P.no_cpu_effect = 1; // for some reason when pulling from the stack, we have to force this to one >.>
+            self.P.b_break = 0; // break flag has to be 0 here
         },
         .ROL => {
             const operand = self.bus.readByte(address);
@@ -403,18 +418,21 @@ pub fn step(self: *CPU6502) void {
         },
         .ROR => {
             const operand = self.bus.readByte(address);
-            self.P.c_carry = @truncate(operand & 0x01);
             const shifted_value = operand >> 1 | (@as(u8, self.P.c_carry) << 7);
+            self.P.c_carry = @truncate(operand & 0x01);
             self.bus.writeByte(address, shifted_value);
-            self.updateNZFlags(shifted_value); // N is 0, Z is updated based on the result
+            self.updateNZFlags(shifted_value);
         },
         .RORA => {
-            self.P.c_carry = @truncate(self.acc & 0x01);
+            const operand = self.acc;
             self.acc = (self.acc >> 1) | (@as(u8, self.P.c_carry) << 7);
-            self.updateNZFlags(self.acc); // N is 0, Z is updated based on the accumulator
+            self.P.c_carry = @truncate(operand & 0x01);
+            self.updateNZFlags(self.acc);
         },
         .RTI => {
             self.P = @bitCast(self.popFromStack());
+            self.P.b_break = 0;
+            self.P.no_cpu_effect = 1;
             const low_byte = self.popFromStack();
             const high_byte = self.popFromStack();
             self.pc = @as(u16, (@as(u16, high_byte) << 8) | low_byte);
@@ -524,15 +542,45 @@ fn handleIRQ(self: *CPU6502) void {
     self.irq = false;
     self.pushToStack(@truncate(self.pc >> 8));
     self.pushToStack(@truncate(self.pc & 0xFF));
+    self.P.b_break = 0;
     self.pushToStack(@bitCast(self.P));
     self.P.i_interrupt_disable = 1;
     self.pc = self.bus.readWord(0xFFFE);
 }
 
 pub fn reset(self: *CPU6502) void {
-    self.sp = 0xFF;
+    // Initial state
+    self.sp = 0x00;
     self.P.i_interrupt_disable = 1;
-    self.pc = self.bus.readWord(0xFFFC);
-    self.irq_pending = false;
-    self.nmi_pending = false;
+    self.irq = false;
+    self.nmi = false;
+    
+    // Read reset vector
+    const low_byte = self.bus.readByte(0xFFFC); // Cycle 6
+    const high_byte = self.bus.readByte(0xFFFD); // Cycle 7
+
+    // Set program counter
+    self.pc = (@as(u16, high_byte) << 8) | low_byte;
+
+    // Final state after RESET sequence
+    self.sp = 0xFD;
+}
+
+pub fn customReset(self: *CPU6502, custom_pc: u16) void {
+    // Initial state
+    self.sp = 0x00;
+    self.P.i_interrupt_disable = 1;
+    self.irq = false;
+    self.nmi = false;
+
+    // Read reset vector
+    const low_byte = self.bus.readByte(0xFFFC); // Cycle 6
+    const high_byte = self.bus.readByte(0xFFFD); // Cycle 7
+    std.debug.print("{x}\n", .{(@as(u16, high_byte) << 8) | low_byte});
+
+    // Set program counter
+    self.pc = custom_pc;
+
+    // Final state after RESET sequence
+    self.sp = 0xFD;
 }

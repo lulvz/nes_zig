@@ -3,6 +3,7 @@ const Cartridge = @import("cartridge.zig");
 const PPUBus = @This();
 
 cartridge: *Cartridge,
+// TODO ADD VRAM, AND PALLETES
 
 pub fn init(cartridge: *Cartridge) PPUBus {
     return .{
