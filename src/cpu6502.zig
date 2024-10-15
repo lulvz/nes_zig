@@ -50,7 +50,7 @@ pub fn init(bus: *Bus) CPU6502 {
 }
 
 pub fn logCpuState(self: *CPU6502, log_writer: anytype) !void {
-    try std.fmt.format(log_writer, "{X:04} {s} A:{X:0>2} X:{X:0>2} Y:{X:0>2} P:{X:0>2} SP:{X:0>2}\n", .{self.pc, @tagName(instructions.instruction_set[self.bus.readByte(self.pc)].opcode), self.acc, self.X, self.Y, @as(u8, @bitCast(self.P)), self.sp});
+    try std.fmt.format(log_writer, "{X:04} {s} A:{X:0>2} X:{X:0>2} Y:{X:0>2} P:{X:0>2} SP:{X:0>2}\n", .{self.pc, @tagName(instructions.instruction_set[self.bus.readByte(self.pc)].opcode)[0..3], self.acc, self.X, self.Y, @as(u8, @bitCast(self.P)), self.sp});
     // try std.fmt.format(log_writer, "P:{X:0>2}\n", .{@as(u8, @bitCast(self.P))});
 }
 
@@ -112,7 +112,10 @@ pub fn step(self: *CPU6502) void {
         },
         .INDIRECT => {
             const pointer = self.bus.readWord(self.pc);
-            address = self.bus.readWord(pointer);
+            const page = pointer & 0xFF00;
+            const address_lo = self.bus.readByte(pointer);
+            const address_hi = self.bus.readByte(page + ((pointer +% 1)&0x00FF));
+            address = @as(u16, address_hi)<<8 | address_lo;
             self.pc +%= 2;
         },
 
@@ -289,9 +292,6 @@ pub fn step(self: *CPU6502) void {
             
             // Set carry flag if acc >= operand (which is equivalent to acc - operand >= 0 in unsigned arithmetic)
             self.P.c_carry = if (operand <= self.acc) 1 else 0;
-            if(operand == 0x5D) {
-                std.debug.print("Operand is 0x5D, accumulator is: {x}", .{self.acc});
-            }
         },
         .CPX => {
             const operand: u8 = self.bus.readByte(address);

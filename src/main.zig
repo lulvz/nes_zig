@@ -38,6 +38,7 @@ pub fn run6502Test() anyerror!void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator(); 
     cartridge = try Cartridge.init("test_bin/nestest.nes", allocator);
+    // cartridge = try Cartridge.init("test_bin/official_only.nes", allocator);
     // cartridge = try Cartridge.init("test_bin/01-implied.nes", allocator);
     defer cartridge.deinit();
     cartridge.printHeader();
