@@ -40,7 +40,8 @@ fn run6502Test() anyerror!void {
     defer cartridge.deinit();
     cartridge.printHeader();
 
-    cpu.customReset(0xC000);
+    // cpu.customReset(0xC000);
+    cpu.reset();
     try initAndRunWindow(&cpu, &bus, &ppu);
 }
 

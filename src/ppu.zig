@@ -182,9 +182,31 @@ pub fn render(self: *PPU) void {
                 const y: usize = @intCast(self.scanline);
                 const index = y * 256 + x;
 
-                // Combine the new color values
-                self.frame_buffer[index] = 0xFF000000 | 0x00332299 + self.frame;
-                // std.debug.print("{x}", .{self.frame_buffer[index]});
+                // nametable coordinates
+                const nametable_x = x / 8;
+                const nametable_y = y / 8;
+                const nametable_index = (nametable_y * 32) + nametable_x;
+
+                // read the tile index from nametable
+                const nametable_addr = 0x2000 | (self.v & 0x0FFF);
+                const tile_index = self.ppu_bus.ppuReadByte(@truncate(nametable_addr + nametable_index));
+
+                // read tile data from pattern table
+                const pattern_table_addr = if (self.control.b_background_pattern_table == 0) @as(u16, 0x0000) else @as(u16, 0x1000);
+                const tile_addr = pattern_table_addr + @as(u16, tile_index) * 16;
+                const tile_y: u3 = @truncate(y & 0x07);
+                const low_byte = self.ppu_bus.ppuReadByte(@truncate(tile_addr + tile_y));
+                const high_byte = self.ppu_bus.ppuReadByte(@truncate(tile_addr + tile_y + 8));
+
+                // getthe correct bit for this pixel
+                const tile_x: u3 = @truncate(x & 0x07);
+                const pixel = ((high_byte >> (7 - tile_x)) & 1) << 1 | ((low_byte >> (7 - tile_x)) & 1);
+
+                //then use the palette to go get the color from the system palette
+                const palette_index = self.ppu_bus.ppuReadByte(0x3F00 + @as(u14, pixel));
+                const color = self.ppu_bus.system_palette[palette_index];
+
+                self.frame_buffer[index] = color;
             }
         },
         240 => { // post render thng
