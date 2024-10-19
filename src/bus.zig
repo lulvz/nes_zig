@@ -90,7 +90,9 @@ fn standardWriteByte(self: *Bus, addr: u16, value: u8) void {
     switch (addr) {
         0x0000...0x1FFF => self.ram[addr & 0x07FF] = value,
         0x2000...0x3FFF => self.ppu.writeRegister(@truncate(addr & 0x0007), value),
-        0x4000...0x401F => self.apu.writeRegister(addr - 0x4000, value),// TODO FIX THESE VALUES TOO
+        0x4000...0x4013 => self.apu.writeRegister(addr - 0x4000, value),// TODO FIX THESE VALUES TOO
+        0x4014 => self.ppu.dmaCopy(), // TODO
+        0x4015...0x401F => self.apu.writeRegister(addr - 0x4000, value),
         0x4020...0xFFFF => self.cartridge.writeByte(addr, value),
     }
 }
@@ -125,13 +127,20 @@ pub fn loadCartridge(self: *Bus, cartridge: *Cartridge) void {
     self.cartridge = cartridge;
 }
 
+pub fn triggerNMI(self: *Bus) void {
+    self.cpu.triggerNMI();
+}
+
 pub fn reset(self: *Bus) void {
     self.clocks_ticked = 0;
     self.cpu.reset();
 }
 
 pub fn clock(self: *Bus) void {
-    _ = self;
+    self.cpu.step();
+    self.ppu.render();
+    self.ppu.render();
+    self.ppu.render();
 }
 
 // ------------------------ SYSTEM INTERFACE FUNCTIONS ------------------------------
