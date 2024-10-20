@@ -6,6 +6,7 @@ const PPUBus = @import("ppu_bus.zig");
 const CPU6502 = @import("cpu6502.zig");
 const PPU = @import("ppu.zig");
 const APU = @import("apu.zig");
+const Controller = @import("controller.zig");
 const Cartridge = @import("cartridge.zig");
 
 const WINDOW_WIDTH = 1200;
@@ -27,27 +28,27 @@ fn run6502Test() anyerror!void {
     var cpu: CPU6502 = undefined;
     var ppu: PPU = undefined;
     var apu: APU = undefined;
+    var controller: Controller = Controller.init();
     var cartridge: Cartridge = undefined;
     var ppu_bus = try PPUBus.init(&cartridge);
-    var bus = Bus.init(&cpu, &ppu, &apu, &cartridge);
+    var bus = Bus.init(&cpu, &ppu, &apu, &controller, &cartridge);
 
     cpu = CPU6502.init(&bus);
     ppu = PPU.init(&bus, &ppu_bus); 
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator(); 
-    cartridge = try Cartridge.init("test_bin/nestest.nes", allocator);
+    // cartridge = try Cartridge.init("test_bin/nestest.nes", allocator);
+    // cartridge = try Cartridge.init("test_bin/10yf.nes", allocator);
+    cartridge = try Cartridge.init("test_bin/dk.nes", allocator);
     defer cartridge.deinit();
     cartridge.printHeader();
 
     // cpu.customReset(0xC000);
     cpu.reset();
-    try initAndRunWindow(&cpu, &bus, &ppu);
-}
 
-fn initAndRunWindow(cpu: *CPU6502, bus: *Bus, ppu: *PPU) !void {
-    const log = try std.fs.cwd().createFile("execution_log.log", .{});
-    const log_writer = log.writer();
+    // const log = try std.fs.cwd().createFile("execution_log.log", .{});
+    // const log_writer = log.writer();
     rl.initWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "NES Emulator");
     defer rl.closeWindow();
     
@@ -57,24 +58,34 @@ fn initAndRunWindow(cpu: *CPU6502, bus: *Bus, ppu: *PPU) !void {
     defer rl.unloadRenderTexture(target);
 
     while (!rl.windowShouldClose()) { 
-        try cpu.logCpuState(log_writer);
         while (!ppu.frame_finished) {
+            // try cpu.logCpuState(log_writer);
             bus.clock();
         }
         ppu.frame_finished = false;
-        handleInput(&memoryViewStart);
-        updateGameScreen(target, ppu);
-        drawFrame(cpu, bus, memoryViewStart, target);
+        handleInput(&memoryViewStart, &controller);
+        updateGameScreen(target, &ppu);
+        drawFrame(&cpu, &bus, memoryViewStart, target);
     }
 }
 
-fn handleInput(memoryViewStart: *u16) void {
+fn handleInput(memoryViewStart: *u16, controller: *Controller) void {
     if (rl.isKeyDown(rl.KeyboardKey.key_up) and memoryViewStart.* >= 16) {
         memoryViewStart.* -= 16;
     }
     if (rl.isKeyDown(rl.KeyboardKey.key_down) and memoryViewStart.* <= 0xFFF0) {
         memoryViewStart.* += 16;
     }
+
+    // Update controller state based on keyboard input
+    controller.data_line_first_controller.up = @bitCast(rl.isKeyDown(rl.KeyboardKey.key_w));
+    controller.data_line_first_controller.down = @bitCast(rl.isKeyDown(rl.KeyboardKey.key_s));
+    controller.data_line_first_controller.left = @bitCast(rl.isKeyDown(rl.KeyboardKey.key_a));
+    controller.data_line_first_controller.right = @bitCast(rl.isKeyDown(rl.KeyboardKey.key_d));
+    controller.data_line_first_controller.a = @bitCast(rl.isKeyDown(rl.KeyboardKey.key_j));
+    controller.data_line_first_controller.b = @bitCast(rl.isKeyDown(rl.KeyboardKey.key_k));
+    controller.data_line_first_controller.select = @bitCast(rl.isKeyDown(rl.KeyboardKey.key_space));
+    controller.data_line_first_controller.start = @bitCast(rl.isKeyDown(rl.KeyboardKey.key_enter));
 }
 
 fn updateGameScreen(target: rl.RenderTexture2D, ppu: *PPU) void {

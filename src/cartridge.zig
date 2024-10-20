@@ -3,15 +3,6 @@ const Mapper = @import("mappers/mapper.zig").Mapper;
 const NROM = @import("mappers/NROM.zig");
 const Cartridge = @This();
 
-header: Header,
-mapper_id: u8,
-
-PrgROM: []u8,
-ChrROM: []u8,
-mapper: Mapper,
-
-allocator: std.mem.Allocator,
-
 // Least to most significant bit
 const Flags6 = packed struct {
     nametable_arrangement: u1,    // Bit 0: Mirroring (0: Horizontal, 1: Vertical)
@@ -53,6 +44,15 @@ const Header = packed struct {
     padding14: u8,
     padding15: u8,
 };
+
+header: Header,
+mapper_id: u8,
+
+PrgROM: []u8,
+ChrROM: []u8,
+mapper: Mapper,
+
+allocator: std.mem.Allocator,
 
 pub fn init(rom_path: []const u8, allocator: std.mem.Allocator) !Cartridge {
     const file = try std.fs.cwd().openFile(rom_path, .{}); 

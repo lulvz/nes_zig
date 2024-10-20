@@ -167,9 +167,9 @@ pub fn writeRegister(self: *PPU, addr: u3, value: u8) void {
     return;
 }
 
-// TODO 0x4014
-pub fn dmaCopy(self: *PPU) void {
-    _ = self;
+// this receives 256 bytes from the cpu's ram into the object attribut memory of the ppu
+pub fn dmaCopy(self: *PPU, page_number: u8) void {
+    @memcpy(self.oam_data[0..], self.bus.readRamPage(page_number));
 }
 
 pub fn render(self: *PPU) void {
@@ -185,6 +185,7 @@ pub fn render(self: *PPU) void {
                 // nametable coordinates
                 const nametable_x = x / 8;
                 const nametable_y = y / 8;
+                // y * width + x (width is 32 tiles of 8x8)
                 const nametable_index = (nametable_y * 32) + nametable_x;
 
                 // read the tile index from nametable
@@ -226,6 +227,11 @@ pub fn render(self: *PPU) void {
             
         },
         261 => { // pre render scanline
+            if(self.cycle == 1) {
+                self.status.o_sprite_overflow = 0;
+                self.status.s_sprite_zero_hit = 0;
+                self.status.v_vblank = 0;
+            }
         },
         else => {
             std.debug.print("Invalid scanline: {d}\n", .{self.scanline}); 

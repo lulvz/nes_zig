@@ -159,6 +159,8 @@ pub fn step(self: *CPU6502) void {
         },
     }
 
+    // std.debug.print("address: {x}\n", .{address});
+
     switch (i.opcode) {
         .ADC => {
             const operand: u8 = self.bus.readByte(address);
@@ -361,6 +363,9 @@ pub fn step(self: *CPU6502) void {
         },
         .LDA => {
             self.acc = self.bus.readByte(address);    
+            if(address == 0x4016) {
+                std.debug.print("{x}\n", .{self.acc});    
+            }
             self.updateNZFlags(self.acc);
         },
         .LDX => {

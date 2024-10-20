@@ -3,6 +3,7 @@ const std = @import("std");
 const CPU6502 = @import("cpu6502.zig");
 const PPU = @import("ppu.zig");
 const APU = @import("apu.zig");
+const Controller = @import("controller.zig");
 const Cartridge = @import("cartridge.zig");
 
 const Bus = @This();
@@ -12,6 +13,7 @@ ram: [1024*2]u8,
 cpu: *CPU6502,
 ppu: *PPU,
 apu: *APU,
+controller: *Controller,
 cartridge: *Cartridge,
 
 test_ram: [1024*64]u8,
@@ -22,12 +24,13 @@ write_fn: *const fn (self: *Bus, address: u16, value: u8) void,
 clocks_ticked: u64,
 
 // ------------------------ INIT FUNCTIONS ------------------------------
-pub fn init(cpu: *CPU6502, ppu: *PPU, apu: *APU, cartridge: *Cartridge) Bus {
+pub fn init(cpu: *CPU6502, ppu: *PPU, apu: *APU, controller: *Controller, cartridge: *Cartridge) Bus {
     const bus: Bus = .{
         .ram = std.mem.zeroes([1024*2]u8),
         .cpu = cpu,
         .ppu = ppu,
         .apu = apu,
+        .controller = controller,
         .cartridge = cartridge,
         .test_ram = undefined,
         .read_fn = standardReadByte,
@@ -38,13 +41,13 @@ pub fn init(cpu: *CPU6502, ppu: *PPU, apu: *APU, cartridge: *Cartridge) Bus {
     return bus;
 }
 
-pub fn initTesting(cpu: *CPU6502, ppu: *PPU, apu: *APU, cartridge: *Cartridge) Bus {
+pub fn initTesting(cpu: *CPU6502) Bus {
     const bus: Bus = .{
         .ram = undefined,
         .cpu = cpu,
-        .ppu = ppu,
-        .apu= apu,
-        .cartridge = cartridge,
+        .ppu = undefined,
+        .apu= undefined,
+        .cartridge = undefined,
         .test_ram = std.mem.zeroes([1024*64]u8),
         .read_fn = testReadByte,
         .write_fn = testWriteByte,
@@ -77,7 +80,10 @@ fn standardReadByte(self: *Bus, addr: u16) u8 {
     return switch (addr) {
         0x0000...0x1FFF => self.ram[addr & 0x07FF],
         0x2000...0x3FFF => self.ppu.readRegister(@truncate(addr & 0x0007)), // ppu registers from $00 to $07
-        0x4000...0x401F => self.apu.readRegister(addr - 0x4000),// TODO FIX THESE VALUES
+        0x4000...0x4015 => self.apu.readRegister(addr - 0x4000),// TODO FIX THESE VALUES
+        0x4016 => self.controller.readFirstController(),
+        0x4017 => self.controller.readSecondController(),
+        0x4018...0x401F => self.apu.readRegister(addr - 0x4000),
         0x4020...0xFFFF => self.cartridge.readByte(addr),
     };
 }
@@ -91,8 +97,10 @@ fn standardWriteByte(self: *Bus, addr: u16, value: u8) void {
         0x0000...0x1FFF => self.ram[addr & 0x07FF] = value,
         0x2000...0x3FFF => self.ppu.writeRegister(@truncate(addr & 0x0007), value),
         0x4000...0x4013 => self.apu.writeRegister(addr - 0x4000, value),// TODO FIX THESE VALUES TOO
-        0x4014 => self.ppu.dmaCopy(), // TODO
-        0x4015...0x401F => self.apu.writeRegister(addr - 0x4000, value),
+        0x4014 => self.ppu.dmaCopy(value),
+        0x4015 => self.apu.writeRegister(addr - 0x4000, value),
+        0x4016 => self.controller.writeByte(value),
+        0x4017...0x401F => self.apu.writeRegister(addr - 0x4000, value),
         0x4020...0xFFFF => self.cartridge.writeByte(addr, value),
     }
 }
@@ -118,6 +126,12 @@ pub fn readWord(self: *Bus, addr: u16) u16 {
 pub fn writeWord(self: *Bus, addr: u16, value: u16) void {
     self.writeByte(addr, @as(u8, @truncate(value)));
     self.writeByte(addr +% 1, @as(u8, @truncate(value >> 8)));
+}
+
+// this function should only be used to do dma from ram to oam
+pub fn readRamPage(self: *Bus, page_number: u8) []const u8 {
+    const page_base_addr = @as(u16, page_number & 0x1F) << 8;
+    return self.ram[page_base_addr..page_base_addr + 256];
 }
 // ------------------------ MEMORY FUNCTIONS ------------------------------
 
