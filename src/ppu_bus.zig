@@ -1,4 +1,5 @@
 const std = @import("std");
+const rl = @import("raylib");
 const Cartridge = @import("cartridge.zig");
 const PPU = @import("ppu.zig");
 
@@ -11,14 +12,14 @@ vram: [1024*2]u8,
 // ppu frame palette is 8 groups of colors, 4 colors each, so 32 slots need to exist in the frame palette
 palettes: [32]u8,
 // ppu system palette holds 64 different colors, that are referenced by the ppu frame palette
-system_palette: [64]u32,
+system_palette: [64]rl.Color,
 
 pub fn init(cartridge: *Cartridge) !PPUBus {
     var ppubus = PPUBus {
         .cartridge = cartridge,
         .vram = std.mem.zeroes([1024*2]u8),
         .palettes = std.mem.zeroes([32]u8),
-        .system_palette = std.mem.zeroes([64]u32),
+        .system_palette = std.mem.zeroes([64]rl.Color),
     };
     try ppubus.loadPaletteFile("palettes/NES_classig_fbx.pal");
     return ppubus;
@@ -107,6 +108,7 @@ pub fn loadPaletteFile(self: *PPUBus, filename: []const u8) !void {
     var i: usize = 0;
     while (i < num_colors) : (i += 1) {
         _ = try file.read(&buffer);
-        self.system_palette[i] = 0x000000FF | (@as(u32, buffer[0]) << 24) | (@as(u32, buffer[1]) << 16) | (@as(u32, buffer[2]) << 8);
+        // self.system_palette[i] = 0x000000FF | (@as(u32, buffer[0]) << 24) | (@as(u32, buffer[1]) << 16) | (@as(u32, buffer[2]) << 8);
+        self.system_palette[i] = rl.Color{.r = buffer[0], .g = buffer[1], .b = buffer[2], .a = 0xFF};
     }
 }

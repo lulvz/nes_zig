@@ -52,20 +52,25 @@ fn run6502Test() anyerror!void {
     rl.initWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "NES Emulator");
     defer rl.closeWindow();
     
-    rl.setTargetFPS(0);
+    rl.setTargetFPS(60);
     var memoryViewStart: u16 = 0x0000;
     const target = rl.loadRenderTexture(NES_WIDTH, NES_HEIGHT);
     defer rl.unloadRenderTexture(target);
+
+
 
     while (!rl.windowShouldClose()) { 
         while (!ppu.frame_finished) {
             // try cpu.logCpuState(log_writer);
             bus.clock();
         }
+
+        const delta_time = rl.getFrameTime();
+
         ppu.frame_finished = false;
         handleInput(&memoryViewStart, &controller);
         updateGameScreen(target, &ppu);
-        drawFrame(&cpu, &bus, memoryViewStart, target);
+        drawFrame(&cpu, &bus, memoryViewStart, target, delta_time);
     }
 }
 
@@ -92,27 +97,33 @@ fn updateGameScreen(target: rl.RenderTexture2D, ppu: *PPU) void {
     rl.beginTextureMode(target);
     defer rl.endTextureMode();
 
-    for (0..NES_HEIGHT) |y| {
-        for (0..NES_WIDTH) |x| {
-            const color = ppu.frame_buffer[y * NES_WIDTH + x];
-            rl.drawPixel(@intCast(x), @intCast(y), rl.Color{ .r = @truncate(color >> 24), .g = @truncate(color >> 16), .b = @truncate(color >> 8), .a = @truncate(color) });
-        }
-    }
+    // THIS IS VERY SLOW TODO FIND ANOTHER WAY TO DO THIS
+
+    // for (0..NES_HEIGHT) |y| {
+    //     for (0..NES_WIDTH) |x| {
+    //         const color = ppu.frame_buffer[y * NES_WIDTH + x];
+    //         rl.drawPixel(@intCast(x), @intCast(y), rl.Color{ .r = @truncate(color >> 24), .g = @truncate(color >> 16), .b = @truncate(color >> 8), .a = @truncate(color) });
+    //     }
+    // }
+
+    // const buffer:[*]rl.Color = @ptrCast(&ppu.frame_buffer);
+    rl.updateTexture(target.texture, &ppu.frame_buffer);
 }
 
-fn drawFrame(cpu: *CPU6502, bus: *Bus, memoryViewStart: u16, target: rl.RenderTexture2D) void {
+fn drawFrame(cpu: *CPU6502, bus: *Bus, memoryViewStart: u16, target: rl.RenderTexture2D, delta_time: f32) void {
     rl.beginDrawing();
     defer rl.endDrawing();
 
     rl.clearBackground(BG_COLOR);
     const scaledWidth = NES_WIDTH * GAME_SCALE;
     const scaledHeight = NES_HEIGHT * GAME_SCALE;
-    const sourceRec = rl.Rectangle{ .x = 0, .y = 0, .width = @as(f32, NES_WIDTH), .height = -@as(f32, NES_HEIGHT) };
+    const sourceRec = rl.Rectangle{ .x = 0, .y = 0, .width = @as(f32, NES_WIDTH), .height = -@as(f32, -NES_HEIGHT) };
     const destRec = rl.Rectangle{ .x = 0, .y = 0, .width = @as(f32, scaledWidth), .height = @as(f32, scaledHeight) };
     
     rl.drawTexturePro(target.texture, sourceRec, destRec, .{ .x = 0, .y = 0 }, 0, rl.Color.white);
-    rl.drawText("NES Screen", 10, NES_HEIGHT * GAME_SCALE + 10, 20, FG_ACCENT_COLOR);
-    
+    // rl.drawText("NES Screen", 10, NES_HEIGHT * GAME_SCALE + 10, 20, FG_ACCENT_COLOR);
+    rl.drawText(rl.textFormat("Current FPS: %f", .{1.0/delta_time}), 10, NES_HEIGHT * GAME_SCALE + 20, 20, rl.Color.ray_white);
+
     drawDebugPanel(cpu, bus, memoryViewStart);
 }
 

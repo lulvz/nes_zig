@@ -363,9 +363,6 @@ pub fn step(self: *CPU6502) void {
         },
         .LDA => {
             self.acc = self.bus.readByte(address);    
-            if(address == 0x4016) {
-                std.debug.print("{x}\n", .{self.acc});    
-            }
             self.updateNZFlags(self.acc);
         },
         .LDX => {
