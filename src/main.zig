@@ -121,9 +121,12 @@ fn drawFrame(cpu: *CPU6502, bus: *Bus, memoryViewStart: u16, target: rl.RenderTe
     const destRec = rl.Rectangle{ .x = 0, .y = 0, .width = @as(f32, scaledWidth), .height = @as(f32, scaledHeight) };
     
     rl.drawTexturePro(target.texture, sourceRec, destRec, .{ .x = 0, .y = 0 }, 0, rl.Color.white);
-    // rl.drawText("NES Screen", 10, NES_HEIGHT * GAME_SCALE + 10, 20, FG_ACCENT_COLOR);
+    rl.drawText("NES Screen", 10, NES_HEIGHT * GAME_SCALE + 10, 20, FG_ACCENT_COLOR);
     rl.drawText(rl.textFormat("Current FPS: %f", .{1.0/delta_time}), 10, NES_HEIGHT * GAME_SCALE + 20, 20, rl.Color.ray_white);
 
+    // _ = cpu;
+    // _ = bus;
+    // _ = memoryViewStart;
     drawDebugPanel(cpu, bus, memoryViewStart);
 }
 
